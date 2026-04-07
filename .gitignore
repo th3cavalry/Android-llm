@@ -27,3 +27,6 @@ ehthumbs.db
 # Keystore files (never commit these)
 *.keystore
 *.jks
+
+# Kotlin compiler artefacts
+.kotlin/

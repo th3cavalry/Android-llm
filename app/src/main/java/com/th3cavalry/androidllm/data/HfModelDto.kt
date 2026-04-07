@@ -38,11 +38,19 @@ data class HfSiblingDto(
         else                 -> "< 1 MB"
     }
 
-    /** The quantization label extracted from the filename, e.g. "q4_ekv4096". */
+    /**
+     * The quantization label extracted from the filename, e.g. "q4_ekv4096".
+     * Strips the model-name prefix (uppercase or short alphabetic segments) and
+     * returns everything after it, joined by underscores.
+     */
     val quantLabel: String get() {
         val base = rfilename.substringBeforeLast('.')
-        // Strip leading model-name prefix separated by underscores, keep the tail
-        return base.split("_").dropWhile { it.all(Char::isUpperCase) || it.all(Char::isLetter) && it.length <= 3 }.joinToString("_").ifBlank { base }
+        val segments = base.split("_")
+        val prefixEnd = segments.indexOfFirst { segment ->
+            !segment.all(Char::isUpperCase) && !(segment.all(Char::isLetter) && segment.length <= 3)
+        }
+        return if (prefixEnd <= 0) base
+        else segments.drop(prefixEnd).joinToString("_")
     }
 
     /** True for `.litertlm` files (LiteRT-LM backend). */
