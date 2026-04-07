@@ -33,11 +33,19 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
-      - name: Determine tag name
+      - name: Determine tag name and create tag if needed
         id: tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+            TAG="${{ github.event.inputs.tag }}"
+            echo "name=${TAG}" >> "$GITHUB_OUTPUT"
+            # Create and push the tag if it doesn't already exist
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            if ! git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+              git tag "${TAG}"
+              git push origin "${TAG}"
+            fi
           else
             echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
