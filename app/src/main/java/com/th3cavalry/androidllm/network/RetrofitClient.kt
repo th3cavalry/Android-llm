@@ -29,4 +29,36 @@ object RetrofitClient {
             .build()
             .create(LLMApi::class.java)
     }
+
+    /**
+     * Builds a [HfApiService] for the Hugging Face Hub REST API.
+     *
+     * @param hfToken Optional HF personal access token.  When provided it is sent as
+     *   `Authorization: Bearer <token>` on every request, unlocking gated model downloads.
+     */
+    fun buildHfApi(hfToken: String = ""): HfApiService {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(loggingInterceptor)
+            .apply {
+                if (hfToken.isNotBlank()) {
+                    addInterceptor { chain ->
+                        chain.proceed(
+                            chain.request().newBuilder()
+                                .header("Authorization", "Bearer $hfToken")
+                                .build()
+                        )
+                    }
+                }
+            }
+            .build()
+
+        return Retrofit.Builder()
+            .baseUrl("https://huggingface.co/")
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(HfApiService::class.java)
+    }
 }

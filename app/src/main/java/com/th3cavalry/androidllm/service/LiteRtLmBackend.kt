@@ -1,8 +1,10 @@
 package com.th3cavalry.androidllm.service
 
 import android.content.Context
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Message
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -18,8 +20,7 @@ import kotlinx.coroutines.withContext
  * Acceleration: GPU (OpenCL/OpenGL), NPU (on supported chipsets), CPU fallback.
  * Requires Android 10+ and at least 4 GB RAM for 1B+ parameter models.
  *
- * Note: The LiteRT-LM library is currently in alpha (`0.0.0-alpha05`). The API
- * surface is stable for basic inference but may evolve in future releases.
+ * Note: Updated to `0.10.0` (stable release). The API was previously alpha-only.
  *
  * Lifecycle: call [initialize] before [generate]; call [close] when done.
  *
@@ -39,16 +40,16 @@ class LiteRtLmBackend(private val context: Context) : InferenceBackend {
 
     companion object {
         /**
-         * KV-cache memory limit in MB. Controls the maximum context window that can be
-         * held in memory; larger values allow longer conversations but use more RAM.
+         * Default max tokens limit for context. Controls how many tokens can be processed
+         * in one generation step. Larger values allow longer conversations but require more RAM.
          */
-        private const val KV_CACHE_LIMIT_MB = 512
+        private const val DEFAULT_MAX_TOKENS = 2048
     }
 
     /**
      * Loads the model at [modelPath] (absolute path to a `.litertlm` file).
-     * [maxTokens] and [temperature] are applied as generation defaults; LiteRT-LM
-     * also accepts per-call overrides via session options (not used here).
+     * [maxTokens] sets the context window; [temperature] is not part of [EngineConfig]
+     * in v0.10.0 (it can be set per-conversation via [ConversationConfig]).
      */
     override suspend fun initialize(
         modelPath: String,
@@ -62,8 +63,9 @@ class LiteRtLmBackend(private val context: Context) : InferenceBackend {
             engine = null
 
             val config = EngineConfig(
-                modelPath = modelPath,
-                kvCacheLimitMb = KV_CACHE_LIMIT_MB
+                modelPath    = modelPath,
+                maxNumTokens = maxTokens.takeIf { it > 0 } ?: DEFAULT_MAX_TOKENS,
+                cacheDir     = context.cacheDir.absolutePath
             )
             val newEngine = Engine(config)
             newEngine.initialize()
@@ -83,9 +85,13 @@ class LiteRtLmBackend(private val context: Context) : InferenceBackend {
         val eng = engine
             ?: error("LiteRT-LM engine is not loaded. Configure a model path in Settings.")
         val result = StringBuilder()
+        // Message.of(String) creates a user message from plain text
+        val message = Message.of(prompt)
         eng.createConversation().use { conversation ->
-            conversation.sendMessageAsync(prompt).collect { chunk ->
-                result.append(chunk)
+            conversation.sendMessageAsync(message).collect { chunk ->
+                // Each chunk is a Message; extract text content from it
+                chunk.contents.filterIsInstance<Content.Text>()
+                    .forEach { result.append(it.text) }
             }
         }
         result.toString()

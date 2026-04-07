@@ -41,10 +41,14 @@ object Prefs {
     const val BACKEND_MEDIAPIPE    = "mediapipe"     // MediaPipe LLM Inference — .task files
     const val BACKEND_LITERT_LM    = "litert_lm"    // Google LiteRT-LM — .litertlm files
     const val BACKEND_OLLAMA_LOCAL = "ollama_local"  // Ollama running in Termux at localhost:11434
+    const val BACKEND_GEMINI_NANO  = "gemini_nano"   // Google Gemini Nano via AI Edge SDK (Pixel 9+)
 
     // Model file paths for each local backend (kept separate so users can switch without re-picking)
     const val KEY_ON_DEVICE_MODEL_PATH  = "on_device_model_path"   // MediaPipe .task path
     const val KEY_LITERT_LM_MODEL_PATH  = "litert_lm_model_path"  // LiteRT-LM .litertlm path
+
+    // Hugging Face personal access token — used by the Model Browser for gated model downloads
+    const val KEY_HF_TOKEN = "hf_token"
 
     // Legacy key kept for migration; use KEY_INFERENCE_BACKEND for new code.
     @Deprecated("Use KEY_INFERENCE_BACKEND instead", ReplaceWith("KEY_INFERENCE_BACKEND"))

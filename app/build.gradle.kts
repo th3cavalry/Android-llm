@@ -34,6 +34,9 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        // litertlm-android is compiled with Kotlin 2.2.x metadata; we suppress the version
+        // check since the bytecode is still binary-compatible with our Kotlin 2.0.x compiler.
+        freeCompilerArgs = freeCompilerArgs + listOf("-Xskip-metadata-version-check")
     }
 
     buildFeatures {
@@ -79,9 +82,14 @@ dependencies {
     // On-device LLM inference — Google LiteRT-LM (.litertlm format)
     // Google's next-generation on-device LLM SDK (successor to MediaPipe LLM Inference).
     // Supports Gemma 4, Phi-4, Llama, Qwen; GPU/NPU accelerated.
-    // Note: currently in alpha; API may change in future releases.
     // Models: https://huggingface.co/litert-community
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.0.0-alpha05")
+    // Note: 0.0.0-alpha06 is used for Kotlin 2.0 compatibility; update to 0.9.0+ when upgrading Kotlin.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.0.0-alpha06")
+
+    // On-device LLM inference — Google AI Edge / Gemini Nano (system model, no file needed)
+    // Requires Pixel 9+ running Android 15+. The model is managed by AICore on the device.
+    // Note: experimental; API may evolve. See https://developer.android.com/ai/gemini-nano
+    implementation("com.google.ai.edge.aicore:aicore:0.0.1-exp02")
 
     // SSH client
     implementation("com.github.mwiede:jsch:0.2.17")

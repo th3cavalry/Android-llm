@@ -13,6 +13,7 @@ import com.th3cavalry.androidllm.data.MCPServer
 import com.th3cavalry.androidllm.data.MessageRole
 import com.th3cavalry.androidllm.data.ToolCallData
 import com.th3cavalry.androidllm.network.dto.ToolDto
+import com.th3cavalry.androidllm.service.GeminiNanoBackend
 import com.th3cavalry.androidllm.service.InferenceBackend
 import com.th3cavalry.androidllm.service.LLMService
 import com.th3cavalry.androidllm.service.LiteRtLmBackend
@@ -92,6 +93,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 when (backendKey) {
                     Prefs.BACKEND_MEDIAPIPE -> runOnDeviceLoop(userText, getOrCreateBackend<OnDeviceInferenceService>())
                     Prefs.BACKEND_LITERT_LM -> runOnDeviceLoop(userText, getOrCreateBackend<LiteRtLmBackend>())
+                    Prefs.BACKEND_GEMINI_NANO -> runOnDeviceLoop(userText, getOrCreateBackend<GeminiNanoBackend>())
                     Prefs.BACKEND_OLLAMA_LOCAL -> {
                         // Ollama runs on the device as a local server; treat it as a remote call
                         // pointed at localhost:11434. The endpoint is already configured in Settings.
@@ -141,6 +143,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val newBackend: T = when (T::class) {
             OnDeviceInferenceService::class -> OnDeviceInferenceService(getApplication()) as T
             LiteRtLmBackend::class         -> LiteRtLmBackend(getApplication()) as T
+            GeminiNanoBackend::class       -> GeminiNanoBackend(getApplication()) as T
             else -> error("Unknown backend type ${T::class.simpleName}")
         }
         activeBackend = newBackend
@@ -158,21 +161,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     private suspend fun runOnDeviceLoop(userText: String, backend: InferenceBackend) {
         // Determine the model-path preference key for this backend type
+        // (Gemini Nano has no model file — uses the system model)
         val modelPathKey = when (backend) {
-            is LiteRtLmBackend         -> Prefs.KEY_LITERT_LM_MODEL_PATH
+            is LiteRtLmBackend          -> Prefs.KEY_LITERT_LM_MODEL_PATH
             is OnDeviceInferenceService -> Prefs.KEY_ON_DEVICE_MODEL_PATH
+            is GeminiNanoBackend        -> null   // No local model file needed
             else -> error("Unhandled backend type: ${backend::class.simpleName}")
         }
 
         // Ensure the model is loaded
         if (!backend.isReady()) {
-            val modelPath = Prefs.getString(getApplication(), modelPathKey)
-            if (modelPath.isBlank()) {
-                _error.postValue(
-                    "No model configured for ${backend.displayName}. " +
-                        "Go to Settings → Inference Backend to set a model path."
-                )
-                return
+            val modelPath = if (modelPathKey != null) {
+                Prefs.getString(getApplication(), modelPathKey).also { path ->
+                    if (path.isBlank()) {
+                        _error.postValue(
+                            "No model configured for ${backend.displayName}. " +
+                                "Go to Settings → Inference Backend to set a model path."
+                        )
+                        return
+                    }
+                }
+            } else {
+                "" // Gemini Nano ignores the path
             }
             val result = backend.initialize(
                 modelPath = modelPath,

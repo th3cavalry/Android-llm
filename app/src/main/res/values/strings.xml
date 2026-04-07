@@ -28,7 +28,35 @@
     <!-- Ollama on-device info -->
     <string name="ollama_local_hint">Install Ollama in Termux:\n1. Install Termux from F-Droid\n2. Run: pkg install ollama\n3. Run: ollama serve\n4. Pull a model: ollama pull gemma3:1b\n\nThe API endpoint will be set to http://localhost:11434/v1 automatically.</string>
 
-    <!-- Shared model file copy strings -->
+    <!-- Gemini Nano backend -->
+    <string name="backend_gemini_nano">Gemini Nano — via AI Edge SDK (Pixel 9+ / Android 15+)</string>
+    <string name="gemini_nano_hint">Uses Google\'s system Gemini Nano model via the AI Edge SDK.\n\nNo model file to download — the model is built into the OS on supported devices.\n\nRequirements: Pixel 9 or newer, Android 15 (API 35)+.\n\nNote: The AI Edge SDK is experimental (v0.0.1-exp02) and subject to change.</string>
+
+    <!-- Model Browser -->
+    <string name="browse_model_catalog">Browse Models (Hugging Face)</string>
+    <string name="browse_models_mediapipe">Browse MediaPipe Models</string>
+    <string name="browse_models_litert">Browse LiteRT-LM Models</string>
+    <string name="search_models_hint">Search models…</string>
+    <string name="select_model">Select</string>
+    <string name="download">Download</string>
+    <string name="no_models_found">No models found. Check your internet connection.</string>
+    <string name="no_files_for_backend">No compatible files for this backend.</string>
+    <string name="loading_model_files">Loading file list…</string>
+    <string name="sheet_select_file_hint">Tap a file to download it to your device.</string>
+    <string name="download_model_title">Download model?</string>
+    <string name="download_model_message">Download %1$s (%2$s)?\n\nThe file will be saved to your Downloads folder.</string>
+    <string name="download_started">Downloading %1$s…</string>
+    <string name="download_complete_title">Download complete</string>
+    <string name="download_complete_message">%1$s has been downloaded to your Downloads folder.</string>
+    <string name="set_as_model">Set as model</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="model_path_updated">Model path updated. Tap Save to apply.</string>
+
+    <!-- Hugging Face token -->
+    <string name="section_hf">Hugging Face (Model Browser)</string>
+    <string name="hf_token">HF Access Token (optional)</string>
+    <string name="hf_token_hint">Required for downloading gated models (e.g. Gemma). Get a token at huggingface.co/settings/tokens</string>
+
     <string name="browse_model">Browse…</string>
     <string name="model_copying">Copying model to internal storage…</string>
     <string name="model_ready">Model ready</string>

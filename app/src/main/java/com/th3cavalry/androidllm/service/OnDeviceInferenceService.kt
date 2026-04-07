@@ -36,12 +36,6 @@ class OnDeviceInferenceService(private val context: Context) : InferenceBackend 
     companion object {
         /** Top-K sampling: limits vocabulary to the K most likely tokens each step. */
         private const val SAMPLING_TOP_K = 40
-        /**
-         * Fixed random seed for reproducible model output — same prompt yields the
-         * same response across runs, which is useful for debugging and testing.
-         * For varied outputs across sessions, callers would need to pass a random seed.
-         */
-        private const val SAMPLING_SEED = 42
     }
 
     /**
@@ -50,19 +44,17 @@ class OnDeviceInferenceService(private val context: Context) : InferenceBackend 
      *
      * @return [Result.success] if the model loaded; [Result.failure] with the exception otherwise.
      */
-    suspend fun initialize(
+    override suspend fun initialize(
         modelPath: String,
-        maxTokens: Int = 1024,
-        temperature: Float = 0.8f
+        maxTokens: Int,
+        temperature: Float
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             require(modelPath.isNotBlank()) { "Model path must not be blank." }
             val options = LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(maxTokens)
-                .setTemperature(temperature)
-                .setTopK(SAMPLING_TOP_K)
-                .setRandomSeed(SAMPLING_SEED)
+                .setMaxTopK(SAMPLING_TOP_K)
                 .build()
             // Release any previously loaded model before loading a new one
             llmInference?.close()
@@ -71,20 +63,20 @@ class OnDeviceInferenceService(private val context: Context) : InferenceBackend 
     }
 
     /** Returns true if a model has been successfully loaded. */
-    fun isReady(): Boolean = llmInference != null
+    override fun isReady(): Boolean = llmInference != null
 
     /**
      * Generates a response for [prompt] on the device (blocking, run on IO dispatcher).
      *
      * @throws IllegalStateException if [initialize] was not called or failed.
      */
-    suspend fun generate(prompt: String): String = withContext(Dispatchers.IO) {
+    override suspend fun generate(prompt: String): String = withContext(Dispatchers.IO) {
         llmInference?.generateResponse(prompt)
             ?: error("On-device model is not loaded. Configure a model path in Settings.")
     }
 
     /** Releases the model and frees GPU/CPU memory. */
-    fun close() {
+    override fun close() {
         llmInference?.close()
         llmInference = null
     }
