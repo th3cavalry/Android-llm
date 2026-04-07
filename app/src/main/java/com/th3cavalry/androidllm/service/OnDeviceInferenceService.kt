@@ -24,7 +24,12 @@ import kotlinx.coroutines.withContext
  *
  * Lifecycle: call [initialize] before [generate]; call [close] when done.
  */
-class OnDeviceInferenceService(private val context: Context) {
+class OnDeviceInferenceService(private val context: Context) : InferenceBackend {
+
+    override val displayName = "MediaPipe (.task files)"
+    override val modelFileHint =
+        "Supports .task format. Recommended: Gemma 2B-IT INT4 (~1.4 GB), Phi-2 (~1.6 GB), " +
+            "Falcon 1B (~1 GB). Download .task files from kaggle.com/models/google/gemma"
 
     private var llmInference: LlmInference? = null
 

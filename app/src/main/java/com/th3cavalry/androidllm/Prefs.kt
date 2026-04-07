@@ -32,9 +32,23 @@ object Prefs {
     // MCP servers
     const val KEY_MCP_SERVERS = "mcp_servers"
 
-    // On-device inference
+    // Inference backend selection
+    // Replaces the old binary KEY_ON_DEVICE_ENABLED toggle.
+    const val KEY_INFERENCE_BACKEND = "inference_backend"
+
+    /** Inference backend IDs stored in [KEY_INFERENCE_BACKEND]. */
+    const val BACKEND_REMOTE       = "remote"        // OpenAI-compatible remote API (default)
+    const val BACKEND_MEDIAPIPE    = "mediapipe"     // MediaPipe LLM Inference — .task files
+    const val BACKEND_LITERT_LM    = "litert_lm"    // Google LiteRT-LM — .litertlm files
+    const val BACKEND_OLLAMA_LOCAL = "ollama_local"  // Ollama running in Termux at localhost:11434
+
+    // Model file paths for each local backend (kept separate so users can switch without re-picking)
+    const val KEY_ON_DEVICE_MODEL_PATH  = "on_device_model_path"   // MediaPipe .task path
+    const val KEY_LITERT_LM_MODEL_PATH  = "litert_lm_model_path"  // LiteRT-LM .litertlm path
+
+    // Legacy key kept for migration; use KEY_INFERENCE_BACKEND for new code.
+    @Deprecated("Use KEY_INFERENCE_BACKEND instead", ReplaceWith("KEY_INFERENCE_BACKEND"))
     const val KEY_ON_DEVICE_ENABLED = "on_device_enabled"
-    const val KEY_ON_DEVICE_MODEL_PATH = "on_device_model_path"
 
     // Defaults
     const val DEFAULT_ENDPOINT = "http://localhost:11434/v1"

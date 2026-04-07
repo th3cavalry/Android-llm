@@ -10,19 +10,32 @@
     <string name="clear">Clear</string>
     <string name="connect">Connect</string>
 
-    <!-- On-device inference -->
-    <string name="section_on_device">On-Device Inference</string>
-    <string name="on_device_enabled">Run LLM locally on this device</string>
-    <string name="on_device_hint">When enabled, inference runs on-device using MediaPipe.\nOtherwise the remote API endpoint is used.</string>
-    <string name="on_device_model_path">Model file path (.task format)</string>
+    <!-- Inference backend selector -->
+    <string name="section_inference_backend">Inference Backend</string>
+    <string name="backend_remote">Remote API (OpenAI-compatible endpoint)</string>
+    <string name="backend_mediapipe">MediaPipe — .task files (Gemma, Phi, Falcon)</string>
+    <string name="backend_litert_lm">LiteRT-LM — .litertlm files (Gemma 4, Phi-4, Llama, Qwen) ★ Google\'s new SDK</string>
+    <string name="backend_ollama_local">Ollama on-device (via Termux at localhost:11434)</string>
+
+    <!-- MediaPipe backend settings -->
+    <string name="mediapipe_model_path">Model file path (.task format)</string>
+    <string name="mediapipe_model_hint">Supported: Gemma 2B-IT INT4 (~1.4 GB), Phi-2 (~1.6 GB), Falcon 1B (~1 GB).\nDownload .task files from kaggle.com/models/google/gemma</string>
+
+    <!-- LiteRT-LM backend settings -->
+    <string name="litert_lm_model_path">Model file path (.litertlm format)</string>
+    <string name="litert_lm_model_hint">Supported: Gemma 4 (1B, 4B), Phi-4 Mini, Llama 3.2, Qwen 2.5 and more.\nDownload .litertlm files from huggingface.co/litert-community</string>
+
+    <!-- Ollama on-device info -->
+    <string name="ollama_local_hint">Install Ollama in Termux:\n1. Install Termux from F-Droid\n2. Run: pkg install ollama\n3. Run: ollama serve\n4. Pull a model: ollama pull gemma3:1b\n\nThe API endpoint will be set to http://localhost:11434/v1 automatically.</string>
+
+    <!-- Shared model file copy strings -->
     <string name="browse_model">Browse…</string>
     <string name="model_copying">Copying model to internal storage…</string>
     <string name="model_ready">Model ready</string>
     <string name="model_copy_failed">Failed to copy model</string>
-    <string name="supported_models">Supported: Gemma 2B-IT, Phi-2, Falcon 1B (.task files).\nDownload from kaggle.com/models/google/gemma</string>
 
     <!-- Settings labels -->
-    <string name="section_llm">Remote API (when on-device is off)</string>
+    <string name="section_llm">Remote API (OpenAI-compatible)</string>
     <string name="llm_endpoint">API Endpoint (e.g. http://localhost:11434/v1)</string>
     <string name="llm_api_key">API Key (leave blank for Ollama)</string>
     <string name="llm_model">Model name</string>

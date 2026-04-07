@@ -13,7 +13,9 @@ import com.th3cavalry.androidllm.data.MCPServer
 import com.th3cavalry.androidllm.data.MessageRole
 import com.th3cavalry.androidllm.data.ToolCallData
 import com.th3cavalry.androidllm.network.dto.ToolDto
+import com.th3cavalry.androidllm.service.InferenceBackend
 import com.th3cavalry.androidllm.service.LLMService
+import com.th3cavalry.androidllm.service.LiteRtLmBackend
 import com.th3cavalry.androidllm.service.MCPClient
 import com.th3cavalry.androidllm.service.OnDeviceInferenceService
 import com.th3cavalry.androidllm.service.ToolExecutor
@@ -23,10 +25,15 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * ViewModel that manages the chat session and the agentic tool-calling loop.
- * Supports two inference modes:
+ * Supports multiple inference modes controlled by [Prefs.KEY_INFERENCE_BACKEND]:
  *  - **Remote** (default): calls any OpenAI-compatible API endpoint via [LLMService].
- *  - **On-device**: runs a local .task model via [OnDeviceInferenceService] with a
- *    ReAct-style text-based tool-calling loop (no native function calling required).
+ *  - **MediaPipe**: runs a local .task model via [OnDeviceInferenceService].
+ *  - **LiteRT-LM**: runs a local .litertlm model via [LiteRtLmBackend].
+ *  - **Ollama on-device**: routes through [LLMService] pointed at localhost:11434
+ *    (Ollama must be running in Termux on the same device).
+ *
+ * The on-device backends use a ReAct-style text-based tool-calling loop; the
+ * remote path uses native OpenAI function-calling.
  */
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -43,7 +50,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val history: MutableList<ChatMessage> = mutableListOf()
 
     private val llmService = LLMService(application)
-    private val onDeviceService = OnDeviceInferenceService(application)
+
+    /** Lazily created; only one backend is alive at a time. */
+    private var activeBackend: InferenceBackend? = null
 
     companion object {
         /** MediaPipe caps on-device generation; keep below the model's context window. */
@@ -62,7 +71,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Sends the user's message and runs the appropriate agentic loop based on
-     * the current inference mode (on-device or remote).
+     * the currently selected inference backend.
      */
     fun sendMessage(userText: String) {
         if (userText.isBlank() || _isLoading.value == true) return
@@ -74,14 +83,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isLoading.value = true
         _error.value = null
 
-        val useOnDevice = Prefs.getBoolean(getApplication(), Prefs.KEY_ON_DEVICE_ENABLED)
+        val backendKey = Prefs.getString(
+            getApplication(), Prefs.KEY_INFERENCE_BACKEND, Prefs.BACKEND_REMOTE
+        )
 
         viewModelScope.launch {
             try {
-                if (useOnDevice) {
-                    runOnDeviceLoop(userText)
-                } else {
-                    runRemoteLoop()
+                when (backendKey) {
+                    Prefs.BACKEND_MEDIAPIPE -> runOnDeviceLoop(userText, getOrCreateBackend<OnDeviceInferenceService>())
+                    Prefs.BACKEND_LITERT_LM -> runOnDeviceLoop(userText, getOrCreateBackend<LiteRtLmBackend>())
+                    Prefs.BACKEND_OLLAMA_LOCAL -> {
+                        // Ollama runs on the device as a local server; treat it as a remote call
+                        // pointed at localhost:11434. The endpoint is already configured in Settings.
+                        runRemoteLoop()
+                    }
+                    else -> runRemoteLoop() // BACKEND_REMOTE (default)
                 }
             } catch (e: Exception) {
                 _error.postValue("Error: ${e.message}")
@@ -98,7 +114,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _messages.value = emptyList()
     }
 
-    // ─── Remote loop ──────────────────────────────────────────────────────────
+    // ─── Remote loop ───────────────────────────────────────────────────────────
 
     private suspend fun runRemoteLoop() {
         val tools = buildToolsList()
@@ -115,24 +131,49 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ─── On-device loop (ReAct pattern) ───────────────────────────────────────
 
     /**
-     * Runs a ReAct-style (Reasoning + Acting) loop for on-device models:
-     *  1. Builds a text prompt from conversation history + tool descriptions.
-     *  2. Generates a response on-device.
-     *  3. Parses `<tool_call>{json}</tool_call>` tags from the response.
-     *  4. Executes the tool, appends the result to the prompt context, repeats.
-     *  5. Stops when the model produces a plain-text response (no tool call).
+     * Lazily creates or reuses the backend of type [T], releasing any previously
+     * active backend of a different type first.
      */
-    private suspend fun runOnDeviceLoop(userText: String) {
+    private inline fun <reified T : InferenceBackend> getOrCreateBackend(): T {
+        val current = activeBackend
+        if (current is T) return current
+        current?.close()
+        val newBackend: T = when (T::class) {
+            OnDeviceInferenceService::class -> OnDeviceInferenceService(getApplication()) as T
+            LiteRtLmBackend::class         -> LiteRtLmBackend(getApplication()) as T
+            else -> error("Unknown backend type ${T::class.simpleName}")
+        }
+        activeBackend = newBackend
+        return newBackend
+    }
+
+    /**
+     * Runs a ReAct-style (Reasoning + Acting) loop for on-device models:
+     *  1. Ensures the [backend] model is loaded (initializing from the stored path if needed).
+     *  2. Builds a text prompt from conversation history + tool descriptions.
+     *  3. Generates a response on-device.
+     *  4. Parses `<tool_call>{json}</tool_call>` tags from the response.
+     *  5. Executes the tool, appends the result to the prompt context, and repeats.
+     *  6. Stops when the model produces a plain-text response (no tool call).
+     */
+    private suspend fun runOnDeviceLoop(userText: String, backend: InferenceBackend) {
+        // Determine the model-path preference key for this backend type
+        val modelPathKey = when (backend) {
+            is LiteRtLmBackend -> Prefs.KEY_LITERT_LM_MODEL_PATH
+            else               -> Prefs.KEY_ON_DEVICE_MODEL_PATH // MediaPipe
+        }
+
         // Ensure the model is loaded
-        if (!onDeviceService.isReady()) {
-            val modelPath = Prefs.getString(getApplication(), Prefs.KEY_ON_DEVICE_MODEL_PATH)
+        if (!backend.isReady()) {
+            val modelPath = Prefs.getString(getApplication(), modelPathKey)
             if (modelPath.isBlank()) {
                 _error.postValue(
-                    "No on-device model configured. Go to Settings → On-Device Model to set one up."
+                    "No model configured for ${backend.displayName}. " +
+                        "Go to Settings → Inference Backend to set a model path."
                 )
                 return
             }
-            val result = onDeviceService.initialize(
+            val result = backend.initialize(
                 modelPath = modelPath,
                 maxTokens = Prefs.getInt(
                     getApplication(), Prefs.KEY_LLM_MAX_TOKENS, Prefs.DEFAULT_MAX_TOKENS
@@ -178,7 +219,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             iterations++
 
             val fullPrompt = buildOnDeviceSystemPrompt(toolDescriptions) + context
-            val rawResponse = onDeviceService.generate(fullPrompt).trim()
+            val rawResponse = backend.generate(fullPrompt).trim()
 
             // Extract JSON between <tool_call> ... </tool_call> using simple string search
             // rather than regex to correctly handle nested braces in the JSON body.
@@ -337,7 +378,7 @@ After a tool result is given, continue reasoning. When you have the final answer
 
     override fun onCleared() {
         super.onCleared()
-        onDeviceService.close()
+        activeBackend?.close()
     }
 }
 

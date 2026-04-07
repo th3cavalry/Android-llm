@@ -72,9 +72,16 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
 
-    // On-device LLM inference (MediaPipe LLM Inference API)
-    // Supports Gemma, Phi, Falcon, StableLM in .task format
+    // On-device LLM inference — MediaPipe LLM Inference API (.task format)
+    // Supports Gemma, Phi, Falcon in MediaPipe's LiteRT task format.
     implementation("com.google.mediapipe:tasks-genai:0.10.22")
+
+    // On-device LLM inference — Google LiteRT-LM (.litertlm format)
+    // Google's next-generation on-device LLM SDK (successor to MediaPipe LLM Inference).
+    // Supports Gemma 4, Phi-4, Llama, Qwen; GPU/NPU accelerated.
+    // Note: currently in alpha; API may change in future releases.
+    // Models: https://huggingface.co/litert-community
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.0.0-alpha05")
 
     // SSH client
     implementation("com.github.mwiede:jsch:0.2.17")

@@ -1,10 +1,9 @@
 package com.th3cavalry.androidllm
 
-import android.app.Activity
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.widget.RadioGroup
 import android.widget.SeekBar
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -23,16 +22,15 @@ class SettingsActivity : AppCompatActivity() {
 
     companion object {
         /** File extensions accepted as on-device model files. */
-        private val SUPPORTED_MODEL_EXTENSIONS = setOf("task", "bin", "gguf", "ggml")
+        private val SUPPORTED_MODEL_EXTENSIONS = setOf("task", "bin", "gguf", "ggml", "litertlm")
     }
 
-    /** File picker that copies the chosen .task model file to internal storage. */
-    private val pickModelLauncher = registerForActivityResult(
+    /** File picker for MediaPipe .task model files. */
+    private val pickMediaPipeModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@registerForActivityResult
         val name = resolveFileName(uri) ?: ""
-        // Validate that the selected file looks like a supported model file
         val ext = name.substringAfterLast('.', "").lowercase()
         if (ext !in SUPPORTED_MODEL_EXTENSIONS) {
             Snackbar.make(
@@ -42,7 +40,29 @@ class SettingsActivity : AppCompatActivity() {
             ).show()
             return@registerForActivityResult
         }
-        copyModelFile(uri)
+        copyModelFile(uri, destPrefKey = Prefs.KEY_ON_DEVICE_MODEL_PATH) { path ->
+            binding.etModelPath.setText(path)
+        }
+    }
+
+    /** File picker for LiteRT-LM .litertlm model files. */
+    private val pickLiteRtLmModelLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        val name = resolveFileName(uri) ?: ""
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext !in SUPPORTED_MODEL_EXTENSIONS) {
+            Snackbar.make(
+                binding.root,
+                "Unsupported file type \".$ext\". Please choose a .litertlm model file.",
+                Snackbar.LENGTH_LONG
+            ).show()
+            return@registerForActivityResult
+        }
+        copyModelFile(uri, destPrefKey = Prefs.KEY_LITERT_LM_MODEL_PATH) { path ->
+            binding.etLiteRtLmModelPath.setText(path)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,16 +74,25 @@ class SettingsActivity : AppCompatActivity() {
 
         loadPrefs()
         setupTemperatureSlider()
-        setupOnDeviceToggle()
-        setupBrowseButton()
+        setupBackendSelector()
+        setupBrowseButtons()
     }
 
     private fun loadPrefs() {
-        // On-device
-        val onDevice = Prefs.getBoolean(this, Prefs.KEY_ON_DEVICE_ENABLED)
-        binding.switchOnDevice.isChecked = onDevice
-        binding.layoutOnDeviceModel.visibility = if (onDevice) View.VISIBLE else View.GONE
+        // Inference backend selector
+        val backend = Prefs.getString(this, Prefs.KEY_INFERENCE_BACKEND, Prefs.BACKEND_REMOTE)
+        val radioId = when (backend) {
+            Prefs.BACKEND_MEDIAPIPE    -> R.id.rbMediaPipe
+            Prefs.BACKEND_LITERT_LM   -> R.id.rbLiteRtLm
+            Prefs.BACKEND_OLLAMA_LOCAL -> R.id.rbOllamaLocal
+            else                       -> R.id.rbRemote
+        }
+        binding.rgBackend.check(radioId)
+        updateBackendSections(backend)
+
+        // Model paths for each local backend
         binding.etModelPath.setText(Prefs.getString(this, Prefs.KEY_ON_DEVICE_MODEL_PATH))
+        binding.etLiteRtLmModelPath.setText(Prefs.getString(this, Prefs.KEY_LITERT_LM_MODEL_PATH))
 
         // Remote API
         binding.etLlmEndpoint.setText(
@@ -99,25 +128,53 @@ class SettingsActivity : AppCompatActivity() {
         binding.etSshPrivateKey.setText(Prefs.getString(this, Prefs.KEY_SSH_DEFAULT_KEY))
     }
 
-    private fun setupOnDeviceToggle() {
-        binding.switchOnDevice.setOnCheckedChangeListener { _, checked ->
-            binding.layoutOnDeviceModel.visibility = if (checked) View.VISIBLE else View.GONE
+    private fun setupBackendSelector() {
+        binding.rgBackend.setOnCheckedChangeListener { _: RadioGroup, checkedId: Int ->
+            val backend = when (checkedId) {
+                R.id.rbMediaPipe    -> Prefs.BACKEND_MEDIAPIPE
+                R.id.rbLiteRtLm    -> Prefs.BACKEND_LITERT_LM
+                R.id.rbOllamaLocal -> Prefs.BACKEND_OLLAMA_LOCAL
+                else               -> Prefs.BACKEND_REMOTE
+            }
+            updateBackendSections(backend)
+            // Pre-fill the endpoint field so the user sees the correct value immediately
+            if (backend == Prefs.BACKEND_OLLAMA_LOCAL &&
+                binding.etLlmEndpoint.text.toString().trim().let {
+                    it.isBlank() || !it.contains("localhost")
+                }
+            ) {
+                binding.etLlmEndpoint.setText("http://localhost:11434/v1")
+            }
         }
     }
 
-    private fun setupBrowseButton() {
+    /** Shows/hides the per-backend configuration sections. */
+    private fun updateBackendSections(backend: String) {
+        binding.layoutMediaPipeModel.visibility =
+            if (backend == Prefs.BACKEND_MEDIAPIPE) View.VISIBLE else View.GONE
+        binding.layoutLiteRtLmModel.visibility =
+            if (backend == Prefs.BACKEND_LITERT_LM) View.VISIBLE else View.GONE
+        binding.cardOllamaInfo.visibility =
+            if (backend == Prefs.BACKEND_OLLAMA_LOCAL) View.VISIBLE else View.GONE
+    }
+
+    private fun setupBrowseButtons() {
         binding.btnBrowseModel.setOnClickListener {
-            // Open the system file picker for any file type (model files have no standard MIME)
-            pickModelLauncher.launch(arrayOf("*/*"))
+            pickMediaPipeModelLauncher.launch(arrayOf("*/*"))
+        }
+        binding.btnBrowseLiteRtLmModel.setOnClickListener {
+            pickLiteRtLmModelLauncher.launch(arrayOf("*/*"))
         }
     }
 
     /**
-     * Copies the model file chosen by the user to internal storage so MediaPipe
-     * can access it by file path (content:// URIs are not supported by MediaPipe directly).
-     * Shows progress via Snackbar.
+     * Copies the model file chosen by the user to internal storage so the inference
+     * backends can access it by file path. Shows progress via Snackbar.
+     *
+     * @param destPrefKey  The [Prefs] key to write the resolved path to.
+     * @param onSuccess    Called on the main thread with the absolute destination path.
      */
-    private fun copyModelFile(uri: Uri) {
+    private fun copyModelFile(uri: Uri, destPrefKey: String, onSuccess: (String) -> Unit) {
         val snack = Snackbar.make(binding.root, getString(R.string.model_copying), Snackbar.LENGTH_INDEFINITE)
         snack.show()
 
@@ -138,7 +195,8 @@ class SettingsActivity : AppCompatActivity() {
 
             snack.dismiss()
             if (destPath != null) {
-                binding.etModelPath.setText(destPath)
+                Prefs.putString(this@SettingsActivity, destPrefKey, destPath)
+                onSuccess(destPath)
                 Snackbar.make(binding.root, getString(R.string.model_ready), Snackbar.LENGTH_SHORT).show()
             } else {
                 Snackbar.make(binding.root, getString(R.string.model_copy_failed), Snackbar.LENGTH_SHORT).show()
@@ -167,18 +225,35 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun savePrefs() {
-        // On-device
-        Prefs.putBoolean(this, Prefs.KEY_ON_DEVICE_ENABLED, binding.switchOnDevice.isChecked)
+        // Inference backend
+        val backend = when (binding.rgBackend.checkedRadioButtonId) {
+            R.id.rbMediaPipe    -> Prefs.BACKEND_MEDIAPIPE
+            R.id.rbLiteRtLm    -> Prefs.BACKEND_LITERT_LM
+            R.id.rbOllamaLocal -> Prefs.BACKEND_OLLAMA_LOCAL
+            else               -> Prefs.BACKEND_REMOTE
+        }
+        Prefs.putString(this, Prefs.KEY_INFERENCE_BACKEND, backend)
+
+        // Model paths (each backend remembers its own path independently)
         Prefs.putString(
             this, Prefs.KEY_ON_DEVICE_MODEL_PATH,
             binding.etModelPath.text.toString().trim()
         )
+        Prefs.putString(
+            this, Prefs.KEY_LITERT_LM_MODEL_PATH,
+            binding.etLiteRtLmModelPath.text.toString().trim()
+        )
+
+        // When Ollama on-device is selected, ensure the endpoint is localhost.
+        // The UI field is already pre-filled by setupBackendSelector; this is a safety net.
+        val endpointToSave = if (backend == Prefs.BACKEND_OLLAMA_LOCAL) {
+            "http://localhost:11434/v1"
+        } else {
+            binding.etLlmEndpoint.text.toString().trim().ifBlank { Prefs.DEFAULT_ENDPOINT }
+        }
 
         // Remote API
-        Prefs.putString(
-            this, Prefs.KEY_LLM_ENDPOINT,
-            binding.etLlmEndpoint.text.toString().trim().ifBlank { Prefs.DEFAULT_ENDPOINT }
-        )
+        Prefs.putString(this, Prefs.KEY_LLM_ENDPOINT, endpointToSave)
         Prefs.putString(this, Prefs.KEY_LLM_API_KEY, binding.etLlmApiKey.text.toString().trim())
         Prefs.putString(
             this, Prefs.KEY_LLM_MODEL,
