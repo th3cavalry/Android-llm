@@ -167,10 +167,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         context.append("User: $userText\nAssistant:")
 
-        val toolCallRegex = Regex(
-            "<tool_call>\\s*(\\{.*?\\})\\s*</tool_call>",
-            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
-        )
+        // Tag delimiters for extracting on-device tool calls from model output
+        val toolCallStartTag = "<tool_call>"
+        val toolCallEndTag = "</tool_call>"
 
         var iterations = 0
 
@@ -180,19 +179,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val fullPrompt = buildOnDeviceSystemPrompt(toolDescriptions) + context
             val rawResponse = onDeviceService.generate(fullPrompt).trim()
 
-            val toolMatch = toolCallRegex.find(rawResponse)
+            // Extract JSON between <tool_call> ... </tool_call> using simple string search
+            // rather than regex to correctly handle nested braces in the JSON body.
+            val startIdx = rawResponse.indexOf(toolCallStartTag, ignoreCase = true)
+            val endIdx = rawResponse.indexOf(toolCallEndTag, ignoreCase = true)
+            val toolCallJson = if (startIdx >= 0 && endIdx > startIdx) {
+                rawResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
+            } else null
 
-            if (toolMatch != null) {
-                val toolCallJson = toolMatch.groupValues[1].trim()
-
+            if (toolCallJson != null) {
                 @Suppress("UNCHECKED_CAST")
                 val toolCallMap = runCatching {
                     gson.fromJson(toolCallJson, Map::class.java) as? Map<String, Any?>
-                }.getOrNull()
+                }.getOrElse { e ->
+                    // Model produced a malformed tool call; report it and treat as final answer
+                    val msg = "On-device model returned invalid tool call JSON: ${e.message}"
+                    history.add(ChatMessage(role = MessageRole.ASSISTANT, content = msg))
+                    _messages.postValue(history.filterVisible())
+                    return
+                }
 
-                val toolName = toolCallMap?.get("name")?.toString() ?: ""
+                if (toolCallMap == null) {
+                    // Gson returned null (e.g., empty JSON); skip and treat as final answer
+                    val finalText = rawResponse.trimAssistantPrefix()
+                    history.add(ChatMessage(role = MessageRole.ASSISTANT, content = finalText))
+                    _messages.postValue(history.filterVisible())
+                    break
+                }
+
+                val toolName = toolCallMap["name"]?.toString() ?: ""
                 @Suppress("UNCHECKED_CAST")
-                val toolArgs = toolCallMap?.get("arguments")
+                val toolArgs = toolCallMap["arguments"]
                     ?.let { it as? Map<String, Any?> }
                     ?: emptyMap()
 
@@ -230,14 +247,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _messages.postValue(history.filterVisible())
 
                 // Grow the context so the model can see the result
-                context.appendLine(" <tool_call>$toolCallJson</tool_call>")
+                context.appendLine(" $toolCallStartTag$toolCallJson$toolCallEndTag")
                 context.appendLine("Tool result ($toolName): $toolResult")
                 context.append("Assistant:")
 
             } else {
-                // No tool call → final answer
-                val finalText = rawResponse.removePrefix(":").trim()
-                history.add(ChatMessage(role = MessageRole.ASSISTANT, content = finalText))
+                // No tool call tag found → final answer
+                history.add(ChatMessage(role = MessageRole.ASSISTANT, content = rawResponse.trimAssistantPrefix()))
                 _messages.postValue(history.filterVisible())
                 break
             }
@@ -284,6 +300,13 @@ After a tool result is given, continue reasoning. When you have the final answer
         }
 
     // ─── Shared helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Some on-device models (e.g. Gemma) produce a leading `:` or whitespace when the
+     * prompt ends with `"Assistant:"` and generation starts from a blank slate.
+     * Strip it so the displayed response starts cleanly.
+     */
+    private fun String.trimAssistantPrefix(): String = removePrefix(":").trim()
 
     /**
      * Builds the full tools list: built-in tools + tools from enabled MCP servers.

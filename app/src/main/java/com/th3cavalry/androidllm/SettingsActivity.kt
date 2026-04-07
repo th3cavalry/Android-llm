@@ -25,7 +25,19 @@ class SettingsActivity : AppCompatActivity() {
     private val pickModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        if (uri != null) copyModelFile(uri)
+        if (uri == null) return@registerForActivityResult
+        val name = resolveFileName(uri) ?: ""
+        // Validate that the selected file looks like a supported model file
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext !in setOf("task", "bin", "gguf", "ggml")) {
+            Snackbar.make(
+                binding.root,
+                "Unsupported file type \".$ext\". Please choose a .task or .bin model file.",
+                Snackbar.LENGTH_LONG
+            ).show()
+            return@registerForActivityResult
+        }
+        copyModelFile(uri)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
