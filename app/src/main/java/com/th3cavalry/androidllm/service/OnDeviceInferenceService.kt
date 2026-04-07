@@ -32,8 +32,9 @@ class OnDeviceInferenceService(private val context: Context) {
         /** Top-K sampling: limits vocabulary to the K most likely tokens each step. */
         private const val SAMPLING_TOP_K = 40
         /**
-         * Random seed for reproducible output. A fixed value gives deterministic
-         * responses for the same prompt; set to a random int for varied outputs.
+         * Fixed random seed for reproducible model output — same prompt yields the
+         * same response across runs, which is useful for debugging and testing.
+         * For varied outputs across sessions, callers would need to pass a random seed.
          */
         private const val SAMPLING_SEED = 42
     }

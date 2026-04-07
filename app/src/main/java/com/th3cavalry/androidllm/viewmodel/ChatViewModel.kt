@@ -44,7 +44,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val llmService = LLMService(application)
     private val onDeviceService = OnDeviceInferenceService(application)
-    private val gson = Gson()
 
     companion object {
         /** MediaPipe caps on-device generation; keep below the model's context window. */
@@ -53,6 +52,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         private const val MAX_REACT_ITERATIONS = 10
         /** Counter for generating unique on-device tool-call IDs. */
         private val toolCallCounter = AtomicInteger(0)
+        /** Shared Gson instance — thread-safe for reading after construction. */
+        private val gson = Gson()
     }
 
     init {
@@ -181,8 +182,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             // Extract JSON between <tool_call> ... </tool_call> using simple string search
             // rather than regex to correctly handle nested braces in the JSON body.
-            val startIdx = rawResponse.indexOf(toolCallStartTag, ignoreCase = true)
-            val endIdx = rawResponse.indexOf(toolCallEndTag, ignoreCase = true)
+            // Case-sensitive: the prompt instructs the model to use these exact lowercase tags.
+            val startIdx = rawResponse.indexOf(toolCallStartTag)
+            val endIdx = rawResponse.indexOf(toolCallEndTag)
             val toolCallJson = if (startIdx >= 0 && endIdx > startIdx) {
                 rawResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
             } else null

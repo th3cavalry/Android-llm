@@ -21,6 +21,11 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
 
+    companion object {
+        /** File extensions accepted as on-device model files. */
+        private val SUPPORTED_MODEL_EXTENSIONS = setOf("task", "bin", "gguf", "ggml")
+    }
+
     /** File picker that copies the chosen .task model file to internal storage. */
     private val pickModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -29,7 +34,7 @@ class SettingsActivity : AppCompatActivity() {
         val name = resolveFileName(uri) ?: ""
         // Validate that the selected file looks like a supported model file
         val ext = name.substringAfterLast('.', "").lowercase()
-        if (ext !in setOf("task", "bin", "gguf", "ggml")) {
+        if (ext !in SUPPORTED_MODEL_EXTENSIONS) {
             Snackbar.make(
                 binding.root,
                 "Unsupported file type \".$ext\". Please choose a .task or .bin model file.",
