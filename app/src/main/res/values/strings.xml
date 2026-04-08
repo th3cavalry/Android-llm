@@ -111,7 +111,6 @@
     <!-- About -->
     <string name="about">About</string>
     <string name="about_version_label">Version</string>
-    <string name="about_version">0.0.3-alpha</string>
     <string name="about_github_label">GitHub</string>
     <string name="about_github_url">https://github.com/th3cavalry/Android-llm</string>
     <string name="about_license_label">License</string>

@@ -14,6 +14,8 @@ class AboutActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        binding.tvVersion.text = BuildConfig.VERSION_NAME
     }
 
     override fun onSupportNavigateUp(): Boolean {
