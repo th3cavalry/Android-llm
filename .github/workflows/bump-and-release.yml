@@ -1,0 +1,91 @@
+name: Bump Version and Release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  bump-and-release:
+    # Skip if this push is itself the version-bump commit to avoid an infinite loop
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Bump version
+        id: version
+        run: |
+          # Read current versionName, e.g. 0.0.1-alpha
+          CURRENT=$(grep 'versionName = ' app/build.gradle.kts | sed 's/.*versionName = "\(.*\)".*/\1/')
+          echo "Current version: $CURRENT"
+
+          # Strip any pre-release suffix to isolate the numeric part
+          BASE=${CURRENT%%-*}
+
+          # Split semver into components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+
+          # Bump patch
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}-alpha"
+
+          # Bump versionCode
+          CURRENT_CODE=$(grep 'versionCode = ' app/build.gradle.kts | sed 's/.*versionCode = \([0-9]*\).*/\1/')
+          NEW_CODE=$((CURRENT_CODE + 1))
+
+          echo "New version: $NEW_VERSION (code: $NEW_CODE)"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "new_code=$NEW_CODE"       >> "$GITHUB_OUTPUT"
+
+          # Update build.gradle.kts in-place
+          sed -i "s/versionName = \"${CURRENT}\"/versionName = \"${NEW_VERSION}\"/" app/build.gradle.kts
+          sed -i "s/versionCode = ${CURRENT_CODE}/versionCode = ${NEW_CODE}/"       app/build.gradle.kts
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Commit version bump and push tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
+          git tag "v${{ steps.version.outputs.new_version }}"
+          git push origin main
+          git push origin "v${{ steps.version.outputs.new_version }}"
+
+      - name: Rename APK for release
+        run: |
+          TAG="v${{ steps.version.outputs.new_version }}"
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             "app/build/outputs/apk/debug/android-llm-${TAG}.apk"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          name: v${{ steps.version.outputs.new_version }}
+          prerelease: true
+          body: |
+            Android LLM — debug build v${{ steps.version.outputs.new_version }}
+
+            Install the APK on your Android device (minSdk 26 / Android 8.0+).
+            > **Note:** This is a debug build; you will need to enable *Install from unknown sources* on your device.
+          files: |
+            app/build/outputs/apk/debug/android-llm-v${{ steps.version.outputs.new_version }}.apk
