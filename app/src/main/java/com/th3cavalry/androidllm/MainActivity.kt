@@ -126,6 +126,10 @@ class MainActivity : AppCompatActivity() {
                 showModelPickerThenClear()
                 true
             }
+            R.id.action_about -> {
+                startActivity(Intent(this, AboutActivity::class.java))
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
