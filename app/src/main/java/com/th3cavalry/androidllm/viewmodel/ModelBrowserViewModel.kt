@@ -158,12 +158,31 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
         return downloadId
     }
 
-    /** Called when [DownloadManager] reports the download is done. */
-    fun onDownloadComplete(downloadId: Long) {
-        val current = _activeDownload.value ?: return
-        if (current.downloadId == downloadId) {
-            // Keep the state so the Activity can inspect the file path
+    /**
+     * Called when [DownloadManager] broadcasts [DownloadManager.ACTION_DOWNLOAD_COMPLETE].
+     *
+     * Queries the manager for the final status and verifies the file exists on disk
+     * before keeping the state. Returns `true` only when the download succeeded and
+     * the output file is non-empty; `false` otherwise.
+     */
+    fun onDownloadComplete(downloadId: Long): Boolean {
+        val current = _activeDownload.value ?: return false
+        if (current.downloadId != downloadId) return false
+
+        val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val query = DownloadManager.Query().setFilterById(downloadId)
+        val cursor = dm.query(query)
+        val succeeded = cursor.use { c ->
+            if (!c.moveToFirst()) return@use false
+            val statusCol = c.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            val reasonCol = c.getColumnIndex(DownloadManager.COLUMN_REASON)
+            val status = c.getInt(statusCol)
+            val reason = if (reasonCol >= 0) c.getInt(reasonCol) else 0
+            status == DownloadManager.STATUS_SUCCESSFUL &&
+                reason == 0 &&
+                File(current.targetPath).let { it.exists() && it.length() > 0 }
         }
+        return succeeded
     }
 
     fun clearDownload() {

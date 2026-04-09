@@ -1,5 +1,8 @@
 package com.th3cavalry.androidllm.service
 
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.google.gson.JsonSyntaxException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -20,6 +23,8 @@ class WebSearchService(
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    private val gson = Gson()
 
     suspend fun search(query: String, numResults: Int = 5): String = withContext(Dispatchers.IO) {
         when {
@@ -69,23 +74,22 @@ class WebSearchService(
     }
 
     private fun parseBraveResults(json: String): String {
-        // Simple JSON parsing without full deserialization
         return try {
+            val root = gson.fromJson(json, JsonObject::class.java)
+            val results = root
+                ?.getAsJsonObject("web")
+                ?.getAsJsonArray("results")
+                ?: return "No results found."
             val sb = StringBuilder("Search Results:\n\n")
-            var count = 0
-            val resultPattern = Regex(
-                """"title"\s*:\s*"([^"]+)".*?"url"\s*:\s*"([^"]+)".*?"description"\s*:\s*"([^"]*?)"""",
-                RegexOption.DOT_MATCHES_ALL
-            )
-            for (match in resultPattern.findAll(json).take(5)) {
-                count++
-                val title = match.groupValues[1].unescape()
-                val url = match.groupValues[2]
-                val desc = match.groupValues[3].unescape()
-                sb.append("$count. **$title**\n   $url\n   $desc\n\n")
+            results.take(5).forEachIndexed { i, el ->
+                val obj = el.asJsonObject
+                val title = obj.getStringOrEmpty("title").unescape()
+                val url = obj.getStringOrEmpty("url")
+                val desc = obj.getStringOrEmpty("description").unescape()
+                sb.append("${i + 1}. **$title**\n   $url\n   $desc\n\n")
             }
-            if (count == 0) "No results found." else sb.toString()
-        } catch (e: Exception) {
+            if (sb.length <= "Search Results:\n\n".length) "No results found." else sb.toString()
+        } catch (e: JsonSyntaxException) {
             "Error parsing Brave results: ${e.message}"
         }
     }
@@ -107,21 +111,19 @@ class WebSearchService(
 
     private fun parseSerpApiResults(json: String): String {
         return try {
+            val root = gson.fromJson(json, JsonObject::class.java)
+            val results = root?.getAsJsonArray("organic_results")
+                ?: return "No results found."
             val sb = StringBuilder("Search Results:\n\n")
-            var count = 0
-            val resultPattern = Regex(
-                """"title"\s*:\s*"([^"]+)".*?"link"\s*:\s*"([^"]+)".*?"snippet"\s*:\s*"([^"]*?)"""",
-                RegexOption.DOT_MATCHES_ALL
-            )
-            for (match in resultPattern.findAll(json).take(5)) {
-                count++
-                val title = match.groupValues[1].unescape()
-                val url = match.groupValues[2]
-                val snippet = match.groupValues[3].unescape()
-                sb.append("$count. **$title**\n   $url\n   $snippet\n\n")
+            results.take(5).forEachIndexed { i, el ->
+                val obj = el.asJsonObject
+                val title = obj.getStringOrEmpty("title").unescape()
+                val url = obj.getStringOrEmpty("link")
+                val snippet = obj.getStringOrEmpty("snippet").unescape()
+                sb.append("${i + 1}. **$title**\n   $url\n   $snippet\n\n")
             }
-            if (count == 0) "No results found." else sb.toString()
-        } catch (e: Exception) {
+            if (sb.length <= "Search Results:\n\n".length) "No results found." else sb.toString()
+        } catch (e: JsonSyntaxException) {
             "Error parsing SerpAPI results: ${e.message}"
         }
     }
@@ -174,6 +176,9 @@ class WebSearchService(
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private fun JsonObject.getStringOrEmpty(key: String): String =
+        runCatching { get(key)?.asString }.getOrNull() ?: ""
 
     private fun String.unescape(): String =
         replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\")

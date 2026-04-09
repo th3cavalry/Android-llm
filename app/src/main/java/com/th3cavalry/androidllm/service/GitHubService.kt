@@ -1,6 +1,9 @@
 package com.th3cavalry.androidllm.service
 
 import android.util.Base64
+import com.google.gson.Gson
+import com.google.gson.JsonSyntaxException
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -22,6 +25,10 @@ class GitHubService(private val token: String) {
 
     private val baseUrl = "https://api.github.com"
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
+    private val gson = Gson()
+
+    /** Minimal DTO for a single item in the GitHub Contents API array response. */
+    private data class ContentsItemDto(val name: String = "", val type: String = "")
 
     // ─── Read file ───────────────────────────────────────────────────────────
 
@@ -117,20 +124,24 @@ class GitHubService(private val token: String) {
             if (!response.isSuccessful) return@withContext "HTTP ${response.code}: $body"
 
             val sb = StringBuilder("Files in $owner/$repo/${cleanPath.ifEmpty { "/" }}:\n")
-            // Parse JSON array
+            // Parse JSON array using Gson typed DTOs (not regex)
             val trimmed = body.trim()
             if (!trimmed.startsWith("[")) return@withContext body
 
-            val itemPattern = Regex(""""name"\s*:\s*"([^"]+)".*?"type"\s*:\s*"([^"]+)"""", RegexOption.DOT_MATCHES_ALL)
-            var found = false
-            for (match in itemPattern.findAll(body)) {
-                found = true
-                val name = match.groupValues[1]
-                val type = match.groupValues[2]
-                val icon = if (type == "dir") "📁" else "📄"
-                sb.append("$icon $name\n")
+            val listType = object : TypeToken<List<ContentsItemDto>>() {}.type
+            val items: List<ContentsItemDto> = try {
+                gson.fromJson(trimmed, listType)
+            } catch (e: JsonSyntaxException) {
+                return@withContext "Error parsing directory listing: ${e.message}"
             }
-            if (!found) sb.append("(empty directory)")
+            if (items.isEmpty()) {
+                sb.append("(empty directory)")
+            } else {
+                items.forEach { item ->
+                    val icon = if (item.type == "dir") "📁" else "📄"
+                    sb.append("$icon ${item.name}\n")
+                }
+            }
             sb.toString()
         } catch (e: Exception) {
             "Error listing files: ${e.message}"

@@ -248,9 +248,18 @@ class ModelBrowserActivity : AppCompatActivity() {
     }
 
     private fun onDownloadComplete(downloadId: Long) {
-        viewModel.onDownloadComplete(downloadId)
+        val succeeded = viewModel.onDownloadComplete(downloadId)
         val download = viewModel.activeDownload.value ?: return
         val backendId = viewModel.backendId
+
+        if (!succeeded) {
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.download_failed_title))
+                .setMessage(getString(R.string.download_failed_message, download.filename))
+                .setPositiveButton(android.R.string.ok) { _, _ -> viewModel.clearDownload() }
+                .show()
+            return
+        }
 
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.download_complete_title))

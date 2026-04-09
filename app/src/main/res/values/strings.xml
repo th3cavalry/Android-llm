@@ -50,6 +50,8 @@
     <string name="download_started">Downloading %1$s…</string>
     <string name="download_complete_title">Download complete</string>
     <string name="download_complete_message">%1$s has been downloaded to your Downloads folder.</string>
+    <string name="download_failed_title">Download failed</string>
+    <string name="download_failed_message">%1$s could not be downloaded or the file is missing. Please check your storage and try again.</string>
     <string name="set_as_model">Set as model</string>
     <string name="dismiss">Dismiss</string>
     <string name="model_path_updated">Model path updated. Tap Save to apply.</string>

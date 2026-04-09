@@ -271,6 +271,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val toolCallEndTag = "</tool_call>"
 
         var iterations = 0
+        var completedNormally = false
         val startMs = System.currentTimeMillis()
 
         while (iterations < MAX_REACT_ITERATIONS) {
@@ -366,11 +367,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     responseInfo = ResponseInfo(backend.displayName, null, durationMs)
                 ))
                 _messages.postValue(history.filterVisible())
+                completedNormally = true
                 break
             }
         }
 
-        if (iterations >= MAX_REACT_ITERATIONS) {
+        if (!completedNormally) {
             val msg = "Maximum reasoning steps reached."
             history.add(ChatMessage(role = MessageRole.ASSISTANT, content = msg))
             _messages.postValue(history.filterVisible())
