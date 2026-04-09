@@ -13,12 +13,12 @@ class ToolExecutor(private val context: Context) {
 
     private fun webSearchService(): WebSearchService {
         val provider = Prefs.getString(context, Prefs.KEY_SEARCH_PROVIDER, "duckduckgo")
-        val apiKey = Prefs.getString(context, Prefs.KEY_SEARCH_API_KEY)
+        val apiKey = Prefs.getSecret(context, Prefs.KEY_SEARCH_API_KEY)
         return WebSearchService(provider, apiKey)
     }
 
     private fun githubService(): GitHubService {
-        val token = Prefs.getString(context, Prefs.KEY_GITHUB_TOKEN)
+        val token = Prefs.getSecret(context, Prefs.KEY_GITHUB_TOKEN)
         return GitHubService(token)
     }
 
@@ -59,7 +59,7 @@ class ToolExecutor(private val context: Context) {
         val port = (args["port"] as? Number)?.toInt() ?: 22
         val password = args["password"]?.toString()
         val privateKey = args["private_key"]?.toString()
-            ?: Prefs.getString(context, Prefs.KEY_SSH_DEFAULT_KEY).takeIf { it.isNotBlank() }
+            ?: Prefs.getSecret(context, Prefs.KEY_SSH_DEFAULT_KEY).takeIf { it.isNotBlank() }
 
         return sshService.executeCommand(
             host = host,

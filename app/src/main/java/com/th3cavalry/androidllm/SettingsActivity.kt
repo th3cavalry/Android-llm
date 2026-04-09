@@ -83,6 +83,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun loadPrefs() {
+        // Migrate any existing plaintext secrets to encrypted storage on first load
+        Prefs.migrateSecretsToEncrypted(this)
+
         // Inference backend selector
         val backend = Prefs.getString(this, Prefs.KEY_INFERENCE_BACKEND, Prefs.BACKEND_REMOTE)
         val radioId = when (backend) {
@@ -99,14 +102,14 @@ class SettingsActivity : AppCompatActivity() {
         binding.etModelPath.setText(Prefs.getString(this, Prefs.KEY_ON_DEVICE_MODEL_PATH))
         binding.etLiteRtLmModelPath.setText(Prefs.getString(this, Prefs.KEY_LITERT_LM_MODEL_PATH))
 
-        // HF token
-        binding.etHfToken.setText(Prefs.getString(this, Prefs.KEY_HF_TOKEN))
+        // HF token (now encrypted)
+        binding.etHfToken.setText(Prefs.getSecret(this, Prefs.KEY_HF_TOKEN))
 
-        // Remote API
+        // Remote API (endpoint is not sensitive, but API key is)
         binding.etLlmEndpoint.setText(
             Prefs.getString(this, Prefs.KEY_LLM_ENDPOINT, Prefs.DEFAULT_ENDPOINT)
         )
-        binding.etLlmApiKey.setText(Prefs.getString(this, Prefs.KEY_LLM_API_KEY))
+        binding.etLlmApiKey.setText(Prefs.getSecret(this, Prefs.KEY_LLM_API_KEY))
         binding.etLlmModel.setText(
             Prefs.getString(this, Prefs.KEY_LLM_MODEL, Prefs.DEFAULT_MODEL)
         )
@@ -125,15 +128,15 @@ class SettingsActivity : AppCompatActivity() {
             else -> 0
         }
         binding.spinnerSearchProvider.setSelection(providerIndex)
-        binding.etSearchApiKey.setText(Prefs.getString(this, Prefs.KEY_SEARCH_API_KEY))
+        binding.etSearchApiKey.setText(Prefs.getSecret(this, Prefs.KEY_SEARCH_API_KEY))
 
         // GitHub
-        binding.etGithubToken.setText(Prefs.getString(this, Prefs.KEY_GITHUB_TOKEN))
+        binding.etGithubToken.setText(Prefs.getSecret(this, Prefs.KEY_GITHUB_TOKEN))
 
         // SSH
         binding.etSshDefaultHost.setText(Prefs.getString(this, Prefs.KEY_SSH_DEFAULT_HOST))
         binding.etSshDefaultUser.setText(Prefs.getString(this, Prefs.KEY_SSH_DEFAULT_USER))
-        binding.etSshPrivateKey.setText(Prefs.getString(this, Prefs.KEY_SSH_DEFAULT_KEY))
+        binding.etSshPrivateKey.setText(Prefs.getSecret(this, Prefs.KEY_SSH_DEFAULT_KEY))
 
         // Chat appearance toggles
         binding.switchHideToolMessages.isChecked = Prefs.getBoolean(
@@ -369,7 +372,7 @@ class SettingsActivity : AppCompatActivity() {
 
         // Remote API
         Prefs.putString(this, Prefs.KEY_LLM_ENDPOINT, endpointToSave)
-        Prefs.putString(this, Prefs.KEY_LLM_API_KEY, binding.etLlmApiKey.text.toString().trim())
+        Prefs.putSecret(this, Prefs.KEY_LLM_API_KEY, binding.etLlmApiKey.text.toString().trim())
         Prefs.putString(
             this, Prefs.KEY_LLM_MODEL,
             binding.etLlmModel.text.toString().trim().ifBlank { Prefs.DEFAULT_MODEL }
@@ -384,12 +387,12 @@ class SettingsActivity : AppCompatActivity() {
             else -> "duckduckgo"
         }
         Prefs.putString(this, Prefs.KEY_SEARCH_PROVIDER, provider)
-        Prefs.putString(this, Prefs.KEY_SEARCH_API_KEY, binding.etSearchApiKey.text.toString().trim())
-        Prefs.putString(this, Prefs.KEY_GITHUB_TOKEN, binding.etGithubToken.text.toString().trim())
-        Prefs.putString(this, Prefs.KEY_HF_TOKEN, binding.etHfToken.text.toString().trim())
+        Prefs.putSecret(this, Prefs.KEY_SEARCH_API_KEY, binding.etSearchApiKey.text.toString().trim())
+        Prefs.putSecret(this, Prefs.KEY_GITHUB_TOKEN, binding.etGithubToken.text.toString().trim())
+        Prefs.putSecret(this, Prefs.KEY_HF_TOKEN, binding.etHfToken.text.toString().trim())
         Prefs.putString(this, Prefs.KEY_SSH_DEFAULT_HOST, binding.etSshDefaultHost.text.toString().trim())
         Prefs.putString(this, Prefs.KEY_SSH_DEFAULT_USER, binding.etSshDefaultUser.text.toString().trim())
-        Prefs.putString(this, Prefs.KEY_SSH_DEFAULT_KEY, binding.etSshPrivateKey.text.toString().trim())
+        Prefs.putSecret(this, Prefs.KEY_SSH_DEFAULT_KEY, binding.etSshPrivateKey.text.toString().trim())
 
         // Chat appearance
         Prefs.putBoolean(this, Prefs.KEY_HIDE_TOOL_MESSAGES, binding.switchHideToolMessages.isChecked)

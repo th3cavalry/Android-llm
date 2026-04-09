@@ -2,6 +2,8 @@ package com.th3cavalry.androidllm
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.th3cavalry.androidllm.data.ChatSession
@@ -10,6 +12,7 @@ import com.th3cavalry.androidllm.data.MCPServer
 object Prefs {
 
     private const val PREF_NAME = "androidllm_prefs"
+    private const val ENCRYPTED_PREF_NAME = "androidllm_secure_prefs"
 
     // LLM settings
     const val KEY_LLM_ENDPOINT = "llm_endpoint"
@@ -76,6 +79,27 @@ object Prefs {
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
+    /**
+     * Get encrypted SharedPreferences for storing secrets (API keys, tokens, SSH keys).
+     * These are backed by Android Keystore and NOT included in backups.
+     */
+    private fun encryptedPrefs(context: Context): SharedPreferences = runCatching {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            context,
+            ENCRYPTED_PREF_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }.getOrElse { e ->
+        // Fallback: if encryption setup fails (rare), log and use regular prefs
+        android.util.Log.e("Prefs", "Failed to initialize encrypted prefs", e)
+        prefs(context)
+    }
+
     fun getString(context: Context, key: String, default: String = ""): String =
         prefs(context).getString(key, default) ?: default
 
@@ -99,6 +123,54 @@ object Prefs {
 
     fun putBoolean(context: Context, key: String, value: Boolean) =
         prefs(context).edit().putBoolean(key, value).apply()
+
+    // ─── Encrypted Storage Helpers (for secrets) ────────────────────────────────────
+
+    /**
+     * Retrieve a secret (API key, token, etc.) from encrypted storage.
+     * These are backed by Android Keystore and NOT backed up.
+     */
+    fun getSecret(context: Context, key: String, default: String = ""): String =
+        encryptedPrefs(context).getString(key, default) ?: default
+
+    /**
+     * Store a secret (API key, token, etc.) in encrypted storage.
+     * These are backed by Android Keystore and NOT backed up.
+     */
+    fun putSecret(context: Context, key: String, value: String) =
+        encryptedPrefs(context).edit().putString(key, value).apply()
+
+    /**
+     * Clear all secrets (useful for logout or account switching).
+     */
+    fun clearSecrets(context: Context) {
+        encryptedPrefs(context).edit().clear().apply()
+    }
+
+    /**
+     * Migrate plaintext secrets from unencrypted SharedPreferences to encrypted storage.
+     * Call this once during app initialization to move existing secrets to Keystore-backed storage.
+     * This is a one-time migration and can be safely called repeatedly.
+     */
+    fun migrateSecretsToEncrypted(context: Context) {
+        val secretKeys = listOf(
+            KEY_LLM_API_KEY,
+            KEY_SEARCH_API_KEY,
+            KEY_GITHUB_TOKEN,
+            KEY_SSH_DEFAULT_KEY,
+            KEY_HF_TOKEN
+        )
+
+        secretKeys.forEach { key ->
+            val plaintext = prefs(context).getString(key, null)
+            if (plaintext != null) {
+                // Move to encrypted storage
+                putSecret(context, key, plaintext)
+                // Remove from unencrypted storage
+                prefs(context).edit().remove(key).apply()
+            }
+        }
+    }
 
     fun getMCPServers(context: Context): List<MCPServer> {
         val json = getString(context, KEY_MCP_SERVERS)

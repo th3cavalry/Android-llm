@@ -56,7 +56,7 @@ class TerminalActivity : AppCompatActivity() {
         val host = binding.etHost.text.toString().trim()
         val user = binding.etUsername.text.toString().trim()
         val password = binding.etPassword.text.toString()
-        val key = Prefs.getString(this, Prefs.KEY_SSH_DEFAULT_KEY)
+        val key = Prefs.getSecret(this, Prefs.KEY_SSH_DEFAULT_KEY)
         val port = binding.etPort.text.toString().toIntOrNull() ?: 22
 
         if (host.isEmpty() || user.isEmpty()) {

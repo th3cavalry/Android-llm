@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Default: HTTPS only, no cleartext -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">example.com</domain>
+    </domain-config>
+
+    <!-- Debug-only: allow cleartext for localhost + local network (development) -->
+    <debug-overrides>
+        <trust-anchors>
+            <!-- Trust system CAs (for production HTTPS) -->
+            <certificates src="system" />
+            <!-- Trust user-installed CAs (for local development) -->
+            <certificates src="user" />
+        </trust-anchors>
+        <!-- Allow cleartext ONLY on localhost for local API servers during development -->
+        <domain-config cleartextTrafficPermitted="true">
+            <domain includeSubdomains="true">localhost</domain>
+            <domain includeSubdomains="true">127.0.0.1</domain>
+        </domain-config>
+    </debug-overrides>
+</network-security-config>

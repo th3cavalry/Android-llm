@@ -23,7 +23,7 @@ class LLMService(private val context: Context) {
     )
 
     private fun buildAuth(): String {
-        val key = Prefs.getString(context, Prefs.KEY_LLM_API_KEY)
+        val key = Prefs.getSecret(context, Prefs.KEY_LLM_API_KEY)
         return if (key.isBlank()) "Bearer none" else "Bearer $key"
     }
 

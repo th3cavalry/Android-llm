@@ -64,7 +64,7 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
     /** Set by the Activity before calling [loadModels]. */
     var backendId: String = Prefs.BACKEND_LITERT_LM
 
-    private val hfToken: String get() = Prefs.getString(ctx, Prefs.KEY_HF_TOKEN)
+    private val hfToken: String get() = Prefs.getSecret(ctx, Prefs.KEY_HF_TOKEN)
 
     // ────────────────────────────────────────────────────────────
     // Model list

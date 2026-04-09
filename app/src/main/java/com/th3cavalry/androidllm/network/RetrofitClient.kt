@@ -8,8 +8,23 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
 
-    private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+    private fun getLoggingLevel(): HttpLoggingInterceptor.Level {
+        return try {
+            val buildConfigClass = Class.forName("com.th3cavalry.androidllm.BuildConfig")
+            val debugField = buildConfigClass.getField("DEBUG")
+            val isDebug = debugField.getBoolean(null)
+            if (isDebug) HttpLoggingInterceptor.Level.HEADERS else HttpLoggingInterceptor.Level.NONE
+        } catch (e: Exception) {
+            // Fallback to HEADERS for development if BuildConfig is not available
+            HttpLoggingInterceptor.Level.HEADERS
+        }
+    }
+
+    private val loggingInterceptor: HttpLoggingInterceptor by lazy {
+        HttpLoggingInterceptor().apply {
+            // Log at HEADERS level in debug builds only to protect secrets from release builds
+            level = getLoggingLevel()
+        }
     }
 
     fun buildOkHttp(timeoutSeconds: Long = 120): OkHttpClient =

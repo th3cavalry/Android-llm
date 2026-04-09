@@ -43,7 +43,9 @@ class SSHService {
             }
 
             val config = Properties().apply {
-                put("StrictHostKeyChecking", "no")
+                // Enable strict host key checking to prevent MITM attacks
+                // Accepts="ask" for interactive prompts, or "yes" to reject unknown hosts
+                put("StrictHostKeyChecking", "ask")
                 put("PreferredAuthentications",
                     if (!privateKey.isNullOrBlank()) "publickey,password" else "password"
                 )
