@@ -62,7 +62,8 @@ class WebSearchService(
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/json")
-                .header("Accept-Encoding", "gzip")
+                // Do NOT set Accept-Encoding manually — OkHttp only auto-decompresses
+                // gzip when it adds the header itself. Manual gzip would yield binary body.
                 .header("X-Subscription-Token", apiKey)
                 .build()
             val response = httpClient.newCall(request).execute()
