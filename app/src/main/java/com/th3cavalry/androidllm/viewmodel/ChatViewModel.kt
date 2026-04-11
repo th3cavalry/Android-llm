@@ -311,6 +311,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         responseInfo = ResponseInfo(backend.displayName, null, durationMs)
                     ))
                     _messages.postValue(history.filterVisible())
+                    completedNormally = true
                     break
                 }
 
