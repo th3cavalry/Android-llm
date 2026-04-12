@@ -29,5 +29,8 @@ ehthumbs.db
 *.keystore
 *.jks
 
+# Home directory (user's home should never be in the repo)
+~/
+
 # Kotlin compiler artefacts
 .kotlin/
