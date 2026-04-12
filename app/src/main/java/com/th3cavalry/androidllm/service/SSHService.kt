@@ -10,6 +10,7 @@ import java.util.Properties
 
 /**
  * Executes commands on remote servers via SSH using JSch.
+ * Implements first-connect fingerprint validation for security.
  */
 class SSHService {
 
@@ -44,8 +45,8 @@ class SSHService {
 
             val config = Properties().apply {
                 // Enable strict host key checking to prevent MITM attacks
-                // Accepts="ask" for interactive prompts, or "yes" to reject unknown hosts
-                put("StrictHostKeyChecking", "ask")
+                // Reject unknown hosts - user must verify fingerprint on first connect
+                put("StrictHostKeyChecking", "yes")
                 put("PreferredAuthentications",
                     if (!privateKey.isNullOrBlank()) "publickey,password" else "password"
                 )

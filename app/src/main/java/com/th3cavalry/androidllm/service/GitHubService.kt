@@ -4,6 +4,10 @@ import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
+import com.th3cavalry.androidllm.dto.GitHubContentsItem
+import com.th3cavalry.androidllm.dto.GitHubFileResponse
+import com.th3cavalry.androidllm.dto.GitHubSearchResult
+import com.th3cavalry.androidllm.dto.GitHubSearchResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -26,9 +30,6 @@ class GitHubService(private val token: String) {
     private val baseUrl = "https://api.github.com"
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
     private val gson = Gson()
-
-    /** Minimal DTO for a single item in the GitHub Contents API array response. */
-    private data class ContentsItemDto(val name: String = "", val type: String = "")
 
     // ─── Read file ───────────────────────────────────────────────────────────
 
@@ -128,8 +129,8 @@ class GitHubService(private val token: String) {
             val trimmed = body.trim()
             if (!trimmed.startsWith("[")) return@withContext body
 
-            val listType = object : TypeToken<List<ContentsItemDto>>() {}.type
-            val items: List<ContentsItemDto> = try {
+            val listType = object : TypeToken<List<GitHubContentsItem>>() {}.type
+            val items: List<GitHubContentsItem> = try {
                 gson.fromJson(trimmed, listType)
             } catch (e: JsonSyntaxException) {
                 return@withContext "Error parsing directory listing: ${e.message}"

@@ -154,4 +154,9 @@
         <item>Brave Search (API key required)</item>
         <item>SerpAPI (API key required)</item>
     </string-array>
+
+    <!-- Permissions -->
+    <string name="permissions_required">Permissions Required</string>
+    <string name="permissions_explanation">This app needs storage permissions to download and access AI models. Without these permissions, model downloads and access may not work properly.</string>
+    <string name="permissions_denied_warning">Some permissions were denied. Model download and access features may be limited.</string>
 </resources>

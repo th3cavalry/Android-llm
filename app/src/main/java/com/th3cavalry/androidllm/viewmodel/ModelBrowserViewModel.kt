@@ -163,7 +163,8 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
      *
      * Queries the manager for the final status and verifies the file exists on disk
      * before keeping the state. Returns `true` only when the download succeeded and
-     * the output file is non-empty; `false` otherwise.
+     * the output file is non-empty and has the correct extension for the backend;
+     * `false` otherwise.
      */
     fun onDownloadComplete(downloadId: Long): Boolean {
         val current = _activeDownload.value ?: return false
@@ -178,9 +179,19 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
             val reasonCol = c.getColumnIndex(DownloadManager.COLUMN_REASON)
             val status = c.getInt(statusCol)
             val reason = if (reasonCol >= 0) c.getInt(reasonCol) else 0
+            val fileExists = File(current.targetPath).let { it.exists() && it.length() > 0 }
+            
+            // Verify the file has the correct extension for this backend
+            val hasCorrectExtension = when (backendId) {
+                Prefs.BACKEND_LITERT_LM -> current.filename.endsWith(".litertlm", ignoreCase = true)
+                Prefs.BACKEND_MEDIAPIPE -> current.filename.endsWith(".task", ignoreCase = true)
+                else -> current.filename.endsWith(".litertlm", ignoreCase = true) || current.filename.endsWith(".task", ignoreCase = true)
+            }
+            
             status == DownloadManager.STATUS_SUCCESSFUL &&
                 reason == 0 &&
-                File(current.targetPath).let { it.exists() && it.length() > 0 }
+                fileExists &&
+                hasCorrectExtension
         }
         return succeeded
     }

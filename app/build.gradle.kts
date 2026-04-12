@@ -11,10 +11,15 @@ android {
         applicationId = "com.th3cavalry.androidllm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.0.3-alpha"
+        versionCode = 4
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Enable APK split by ABI for smaller downloads
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        }
     }
 
     buildTypes {

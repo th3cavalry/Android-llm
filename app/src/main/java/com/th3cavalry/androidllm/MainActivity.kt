@@ -1,6 +1,7 @@
 package com.th3cavalry.androidllm
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -10,6 +11,7 @@ import android.widget.EditText
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.th3cavalry.androidllm.databinding.ActivityMainBinding
@@ -27,6 +29,13 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val MAX_DIALOG_TITLE_LENGTH = 60
+        private const val PERMISSIONS_REQUEST_CODE = 1001
+        private val REQUIRED_PERMISSIONS = arrayOf(
+            android.Manifest.permission.READ_EXTERNAL_STORAGE,
+            android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            android.Manifest.permission.READ_MEDIA_IMAGES,
+            android.Manifest.permission.READ_MEDIA_VIDEO
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,6 +43,11 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+
+        // Check and request permissions on first run
+        if (!hasAllPermissions()) {
+            requestPermissions()
+        }
 
         setupRecyclerView()
         setupInput()
@@ -97,6 +111,57 @@ class MainActivity : AppCompatActivity() {
         viewModel.error.observe(this) { error ->
             if (error != null) {
                 Snackbar.make(binding.root, error, Snackbar.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Permission handling
+    // ────────────────────────────────────────────────────────────
+
+    private fun hasAllPermissions(): Boolean {
+        return REQUIRED_PERMISSIONS.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestPermissions() {
+        if (shouldShowRationale()) {
+            // Show rationale dialog
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.permissions_required))
+                .setMessage(getString(R.string.permissions_explanation))
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    requestPermissions(REQUIRED_PERMISSIONS, PERMISSIONS_REQUEST_CODE)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        } else {
+            requestPermissions(REQUIRED_PERMISSIONS, PERMISSIONS_REQUEST_CODE)
+        }
+    }
+
+    private fun shouldShowRationale(): Boolean {
+        return REQUIRED_PERMISSIONS.any {
+            shouldShowRequestPermissionRationale(it)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSIONS_REQUEST_CODE) {
+            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (!allGranted) {
+                // Permissions denied - show warning but don't block
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.permissions_denied_warning),
+                    Snackbar.LENGTH_LONG
+                ).show()
             }
         }
     }

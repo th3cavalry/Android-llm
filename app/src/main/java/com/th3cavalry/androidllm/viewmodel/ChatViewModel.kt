@@ -286,7 +286,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val startIdx = rawResponse.indexOf(toolCallStartTag)
             val endIdx = rawResponse.indexOf(toolCallEndTag)
             val toolCallJson = if (startIdx >= 0 && endIdx > startIdx) {
-                rawResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
+                // Only treat as tool call if the tag is at the beginning (after trimming)
+                // This prevents false positives when the model includes tags in plain text responses
+                val trimmedResponse = rawResponse.trim()
+                if (trimmedResponse.startsWith(toolCallStartTag)) {
+                    rawResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
+                } else {
+                    null  // Tags not at start, treat as plain text
+                }
             } else null
 
             if (toolCallJson != null) {

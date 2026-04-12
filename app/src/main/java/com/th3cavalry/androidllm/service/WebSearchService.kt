@@ -3,6 +3,10 @@ package com.th3cavalry.androidllm.service
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonSyntaxException
+import com.th3cavalry.androidllm.dto.BraveSearchResponse
+import com.th3cavalry.androidllm.dto.SerpApiResponse
+import com.th3cavalry.androidllm.dto.DuckDuckGoResult
+import com.th3cavalry.androidllm.dto.DuckDuckGoSearchResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -76,18 +80,11 @@ class WebSearchService(
 
     private fun parseBraveResults(json: String): String {
         return try {
-            val root = gson.fromJson(json, JsonObject::class.java)
-            val results = root
-                ?.getAsJsonObject("web")
-                ?.getAsJsonArray("results")
-                ?: return "No results found."
+            val response = gson.fromJson(json, BraveSearchResponse::class.java)
+            val results = response.web?.results ?: return "No results found."
             val sb = StringBuilder("Search Results:\n\n")
-            results.take(5).forEachIndexed { i, el ->
-                val obj = el.asJsonObject
-                val title = obj.getStringOrEmpty("title").unescape()
-                val url = obj.getStringOrEmpty("url")
-                val desc = obj.getStringOrEmpty("description").unescape()
-                sb.append("${i + 1}. **$title**\n   $url\n   $desc\n\n")
+            results.take(5).forEachIndexed { i, result ->
+                sb.append("${i + 1}. **${result.title}**\n   ${result.url}\n   ${result.description}\n\n")
             }
             if (sb.length <= "Search Results:\n\n".length) "No results found." else sb.toString()
         } catch (e: JsonSyntaxException) {
@@ -112,16 +109,11 @@ class WebSearchService(
 
     private fun parseSerpApiResults(json: String): String {
         return try {
-            val root = gson.fromJson(json, JsonObject::class.java)
-            val results = root?.getAsJsonArray("organic_results")
-                ?: return "No results found."
+            val response = gson.fromJson(json, SerpApiResponse::class.java)
+            val results = response.organic_results ?: return "No results found."
             val sb = StringBuilder("Search Results:\n\n")
-            results.take(5).forEachIndexed { i, el ->
-                val obj = el.asJsonObject
-                val title = obj.getStringOrEmpty("title").unescape()
-                val url = obj.getStringOrEmpty("link")
-                val snippet = obj.getStringOrEmpty("snippet").unescape()
-                sb.append("${i + 1}. **$title**\n   $url\n   $snippet\n\n")
+            results.take(5).forEachIndexed { i, result ->
+                sb.append("${i + 1}. **${result.title}**\n   ${result.link}\n   ${result.snippet}\n\n")
             }
             if (sb.length <= "Search Results:\n\n".length) "No results found." else sb.toString()
         } catch (e: JsonSyntaxException) {
