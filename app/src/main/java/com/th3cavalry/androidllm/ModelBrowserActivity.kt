@@ -53,6 +53,7 @@ class ModelBrowserActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityModelBrowserBinding
     private val viewModel: ModelBrowserViewModel by viewModels()
+    private var appliedThemeIndex: Int = 0
 
     private lateinit var catalogAdapter: ModelCatalogAdapter
     private var allModels: List<HfModelDto> = emptyList()
@@ -72,6 +73,7 @@ class ModelBrowserActivity : AppCompatActivity() {
     // ────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        appliedThemeIndex = ThemeHelper.applyTheme(this)
         super.onCreate(savedInstanceState)
         binding = ActivityModelBrowserBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -97,6 +99,11 @@ class ModelBrowserActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(downloadReceiver)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ThemeHelper.recreateIfNeeded(this, appliedThemeIndex)
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -144,6 +151,7 @@ class ModelBrowserActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { viewModel.listState.collect(::renderListState) }
                 launch { viewModel.detailState.collect(::renderDetailState) }
+                launch { viewModel.downloadProgress.collect(::renderDownloadProgress) }
             }
         }
     }
@@ -182,6 +190,23 @@ class ModelBrowserActivity : AppCompatActivity() {
             is ModelDetailState.Success -> showFilesBottomSheet(state.model, state.files)
             is ModelDetailState.Error   -> Toast.makeText(this, state.message, Toast.LENGTH_LONG).show()
             else -> {}
+        }
+    }
+
+    /**
+     * Shows or hides the in-app download progress bar.
+     * [progress] is 0–100 during an active download, or -1 when idle.
+     */
+    private fun renderDownloadProgress(progress: Int) {
+        val filename = viewModel.activeDownload.value?.filename ?: ""
+        if (progress < 0) {
+            binding.layoutDownloadProgress.visibility = View.GONE
+        } else {
+            binding.layoutDownloadProgress.visibility = View.VISIBLE
+            binding.downloadProgressBar.progress = progress
+            binding.tvDownloadStatus.text = getString(
+                R.string.download_progress_label, filename, progress
+            )
         }
     }
 

@@ -23,6 +23,9 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
 
+    /** Theme index that was active when this Activity was (last) created. */
+    private var appliedThemeIndex: Int = 0
+
     companion object {
         /** File extensions accepted as on-device model files. */
         private val SUPPORTED_MODEL_EXTENSIONS = setOf("task", "bin", "gguf", "ggml", "litertlm")
@@ -69,6 +72,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        appliedThemeIndex = ThemeHelper.applyTheme(this)
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -80,6 +84,33 @@ class SettingsActivity : AppCompatActivity() {
         setupBackendSelector()
         setupBrowseButtons()
         setupFetchModels()
+        setupCloudProviderPresets()
+        setupColorThemeSpinner()
+    }
+
+    /**
+     * Wires the color-theme spinner so that theme changes are persisted to Prefs
+     * immediately when the user changes the selection — not deferred to [savePrefs] /
+     * [onPause]. This avoids calling [recreate] from inside [onPause], which causes
+     * awkward lifecycle ordering when navigating back from Settings.
+     */
+    private fun setupColorThemeSpinner() {
+        binding.spinnerColorTheme.onItemSelectedListener =
+            object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: android.widget.AdapterView<*>, view: android.view.View?, pos: Int, id: Long
+                ) {
+                    val current = Prefs.getInt(this@SettingsActivity, Prefs.KEY_COLOR_THEME, 0)
+                    if (pos != current) {
+                        Prefs.putInt(this@SettingsActivity, Prefs.KEY_COLOR_THEME, pos)
+                        // Recreate SettingsActivity now (safe — not in onPause).
+                        // Other activities detect the change via ThemeHelper.recreateIfNeeded
+                        // in their own onResume.
+                        recreate()
+                    }
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
+            }
     }
 
     private fun loadPrefs() {
@@ -146,6 +177,9 @@ class SettingsActivity : AppCompatActivity() {
             this, Prefs.KEY_SHOW_RESPONSE_INFO, false
         )
 
+        // Color theme
+        binding.spinnerColorTheme.setSelection(Prefs.getInt(this, Prefs.KEY_COLOR_THEME, 0))
+
         // System prompt
         binding.etSystemPrompt.setText(Prefs.getString(this, Prefs.KEY_SYSTEM_PROMPT))
 
@@ -204,6 +238,36 @@ class SettingsActivity : AppCompatActivity() {
                     .putExtra(ModelBrowserActivity.EXTRA_BACKEND_ID, Prefs.BACKEND_LITERT_LM)
             )
         }
+    }
+
+    /** Wires the cloud provider spinner to auto-fill the endpoint field. */
+    private fun setupCloudProviderPresets() {
+        binding.spinnerCloudProvider.onItemSelectedListener =
+            object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: android.widget.AdapterView<*>, view: android.view.View?, pos: Int, id: Long
+                ) {
+                    val endpoint = when (pos) {
+                        1 -> "https://api.openai.com/v1"
+                        2 -> "https://api.groq.com/openai/v1"
+                        3 -> "https://openrouter.ai/api/v1"
+                        4 -> "https://api.together.xyz/v1"
+                        5 -> {
+                            // The official Anthropic API is not OpenAI-compatible. Users
+                            // need an OpenAI-compatible proxy (e.g. LiteLLM) in front of it.
+                            Snackbar.make(
+                                binding.root,
+                                getString(R.string.anthropic_proxy_required),
+                                Snackbar.LENGTH_LONG
+                            ).show()
+                            return
+                        }
+                        else -> return
+                    }
+                    binding.etLlmEndpoint.setText(endpoint)
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>) {}
+            }
     }
 
     /** Wires the "Fetch models" button to call GET /v1/models on the configured endpoint. */
@@ -397,6 +461,7 @@ class SettingsActivity : AppCompatActivity() {
         // Chat appearance
         Prefs.putBoolean(this, Prefs.KEY_HIDE_TOOL_MESSAGES, binding.switchHideToolMessages.isChecked)
         Prefs.putBoolean(this, Prefs.KEY_SHOW_RESPONSE_INFO, binding.switchShowResponseInfo.isChecked)
+        // NOTE: KEY_COLOR_THEME is saved immediately by setupColorThemeSpinner() — not here.
 
         // System prompt
         Prefs.putString(this, Prefs.KEY_SYSTEM_PROMPT, binding.etSystemPrompt.text.toString().trim())

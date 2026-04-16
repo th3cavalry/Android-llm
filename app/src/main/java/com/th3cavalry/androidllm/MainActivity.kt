@@ -2,6 +2,7 @@ package com.th3cavalry.androidllm
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -27,18 +28,43 @@ class MainActivity : AppCompatActivity() {
     private val viewModel: ChatViewModel by viewModels()
     private val chatAdapter = ChatAdapter()
 
+    /** Theme index that was active when this Activity was (last) created. */
+    private var appliedThemeIndex: Int = 0
+
     companion object {
         private const val MAX_DIALOG_TITLE_LENGTH = 60
         private const val PERMISSIONS_REQUEST_CODE = 1001
-        private val REQUIRED_PERMISSIONS = arrayOf(
-            android.Manifest.permission.READ_EXTERNAL_STORAGE,
-            android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            android.Manifest.permission.READ_MEDIA_IMAGES,
-            android.Manifest.permission.READ_MEDIA_VIDEO
-        )
+
+        /**
+         * Returns only the permissions that are relevant for the current API level.
+         *
+         * Models downloaded via the Model Browser are saved to app-private external storage
+         * (getExternalFilesDir), which the app can always read without runtime permissions.
+         * The permissions below are therefore only needed for models that were previously
+         * downloaded to the public Downloads folder (pre-0.1.0) and referenced by an absolute
+         * path stored in Prefs — reading such legacy paths still requires the storage permission
+         * on API 29–32.
+         *
+         * - API 33+ (Tiramisu): no storage permission needed.
+         * - API 29–32: READ_EXTERNAL_STORAGE for legacy model paths in public storage.
+         * - API < 29: Also need WRITE_EXTERNAL_STORAGE for DownloadManager fallback.
+         *
+         * READ_MEDIA_IMAGES / READ_MEDIA_VIDEO are intentionally excluded — they apply only
+         * to photos and videos, not to model files (.litertlm / .task).
+         */
+        private fun getRequiredPermissions(): Array<String> = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> emptyArray()
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            else -> arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        appliedThemeIndex = ThemeHelper.applyTheme(this)
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -61,6 +87,8 @@ class MainActivity : AppCompatActivity() {
         chatAdapter.showResponseInfo = Prefs.getBoolean(this, Prefs.KEY_SHOW_RESPONSE_INFO, false)
         // Re-submit the current list so existing messages are rebound with the updated flag
         viewModel.messages.value?.let { chatAdapter.submitList(it.toList()) }
+        // Recreate this activity if the user changed the color theme in Settings
+        ThemeHelper.recreateIfNeeded(this, appliedThemeIndex)
     }
 
     private fun setupRecyclerView() {
@@ -120,31 +148,33 @@ class MainActivity : AppCompatActivity() {
     // ────────────────────────────────────────────────────────────
 
     private fun hasAllPermissions(): Boolean {
-        return REQUIRED_PERMISSIONS.all {
+        val required = getRequiredPermissions()
+        if (required.isEmpty()) return true
+        return required.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
     }
 
     private fun requestPermissions() {
-        if (shouldShowRationale()) {
+        val required = getRequiredPermissions()
+        if (required.isEmpty()) return
+        if (shouldShowRationale(required)) {
             // Show rationale dialog
             AlertDialog.Builder(this)
                 .setTitle(getString(R.string.permissions_required))
                 .setMessage(getString(R.string.permissions_explanation))
                 .setPositiveButton(android.R.string.ok) { _, _ ->
-                    requestPermissions(REQUIRED_PERMISSIONS, PERMISSIONS_REQUEST_CODE)
+                    requestPermissions(required, PERMISSIONS_REQUEST_CODE)
                 }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
         } else {
-            requestPermissions(REQUIRED_PERMISSIONS, PERMISSIONS_REQUEST_CODE)
+            requestPermissions(required, PERMISSIONS_REQUEST_CODE)
         }
     }
 
-    private fun shouldShowRationale(): Boolean {
-        return REQUIRED_PERMISSIONS.any {
-            shouldShowRequestPermissionRationale(it)
-        }
+    private fun shouldShowRationale(permissions: Array<String>): Boolean {
+        return permissions.any { shouldShowRequestPermissionRationale(it) }
     }
 
     override fun onRequestPermissionsResult(

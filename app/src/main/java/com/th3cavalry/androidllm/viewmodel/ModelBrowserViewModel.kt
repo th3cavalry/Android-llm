@@ -11,8 +11,10 @@ import com.th3cavalry.androidllm.Prefs
 import com.th3cavalry.androidllm.data.HfModelDto
 import com.th3cavalry.androidllm.data.HfSiblingDto
 import com.th3cavalry.androidllm.network.RetrofitClient
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -60,6 +62,13 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
 
     private val _activeDownload = MutableStateFlow<DownloadState?>(null)
     val activeDownload: StateFlow<DownloadState?> = _activeDownload
+
+    /**
+     * Download progress as a percentage (0–100), or -1 when no download is active.
+     * Updated by [startProgressPolling].
+     */
+    private val _downloadProgress = MutableStateFlow(-1)
+    val downloadProgress: StateFlow<Int> = _downloadProgress
 
     /** Set by the Activity before calling [loadModels]. */
     var backendId: String = Prefs.BACKEND_LITERT_LM
@@ -135,13 +144,21 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
     fun enqueueDownload(modelId: String, sibling: HfSiblingDto): Long {
         val url      = "https://huggingface.co/$modelId/resolve/main/${sibling.rfilename}"
         val filename = sibling.rfilename
+
+        // Download to app-private external storage (getExternalFilesDir) instead of the
+        // public Downloads folder.  This directory is readable by the app on all API levels
+        // without any runtime storage permissions, which is essential on API 33+ where
+        // READ_EXTERNAL_STORAGE no longer grants access to arbitrary external paths.
+        val modelDir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: ctx.filesDir // fallback to internal storage if external is unavailable
+
         val request  = DownloadManager.Request(Uri.parse(url)).apply {
             setTitle(filename)
             setDescription("Downloading model from Hugging Face")
             setNotificationVisibility(
                 DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
             )
-            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+            setDestinationUri(Uri.fromFile(File(modelDir, filename)))
             if (hfToken.isNotBlank()) {
                 addRequestHeader("Authorization", "Bearer $hfToken")
             }
@@ -150,12 +167,50 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
         }
         val dm         = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val downloadId = dm.enqueue(request)
-        val targetPath = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            filename
-        ).absolutePath
+        val targetPath = File(modelDir, filename).absolutePath
         _activeDownload.value = DownloadState(filename, downloadId, targetPath)
+        startProgressPolling(downloadId)
         return downloadId
+    }
+
+    /**
+     * Polls the [DownloadManager] every 500 ms while the given download is active and
+     * updates [downloadProgress] (0–100). Stops automatically when the download finishes
+     * or when the ViewModel is cleared.
+     */
+    private fun startProgressPolling(downloadId: Long) {
+        _downloadProgress.value = 0
+        viewModelScope.launch {
+            val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            while (isActive && _activeDownload.value?.downloadId == downloadId) {
+                val query = DownloadManager.Query().setFilterById(downloadId)
+                val progress = dm.query(query).use { cursor ->
+                    if (!cursor.moveToFirst()) return@use -1
+                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    if (status == DownloadManager.STATUS_RUNNING ||
+                        status == DownloadManager.STATUS_PAUSED) {
+                        val downloaded = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                        )
+                        val total = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                        )
+                        if (total > 0) ((downloaded * 100L) / total).toInt() else 0
+                    } else {
+                        -1 // done or error
+                    }
+                }
+                if (progress < 0) break
+                _downloadProgress.value = progress
+                delay(500L)
+            }
+            // Only reset progress if this coroutine's download is still the active one.
+            // If a new download was enqueued before we reached this point, leave the new
+            // download's progress state untouched.
+            if (_activeDownload.value?.downloadId == downloadId) {
+                _downloadProgress.value = -1
+            }
+        }
     }
 
     /**
@@ -198,6 +253,7 @@ class ModelBrowserViewModel(application: Application) : AndroidViewModel(applica
 
     fun clearDownload() {
         _activeDownload.value = null
+        _downloadProgress.value = -1
     }
 
     // ────────────────────────────────────────────────────────────
