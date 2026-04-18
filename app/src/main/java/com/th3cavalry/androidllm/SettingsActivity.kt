@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.ArrayAdapter
+import android.widget.ImageView
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import androidx.activity.result.contract.ActivityResultContracts
@@ -80,12 +81,37 @@ class SettingsActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         loadPrefs()
+        setupCollapsibleSections()
         setupTemperatureSlider()
         setupBackendSelector()
         setupBrowseButtons()
         setupFetchModels()
         setupCloudProviderPresets()
         setupColorThemeSpinner()
+    }
+
+    private fun setupCollapsibleSections() {
+        fun toggle(header: View, body: View, chevron: ImageView) {
+            header.setOnClickListener {
+                val expanding = body.visibility != View.VISIBLE
+                body.visibility = if (expanding) View.VISIBLE else View.GONE
+                chevron.setImageResource(
+                    if (expanding) android.R.drawable.arrow_up_float
+                    else android.R.drawable.arrow_down_float
+                )
+                chevron.contentDescription = getString(
+                    if (expanding) R.string.collapse else R.string.expand
+                )
+            }
+        }
+        toggle(binding.headerBackend, binding.bodyBackend, binding.chevronBackend)
+        toggle(binding.headerAppearance, binding.bodyAppearance, binding.chevronAppearance)
+        toggle(binding.headerSystemPrompt, binding.bodySystemPrompt, binding.chevronSystemPrompt)
+        toggle(binding.headerLlm, binding.bodyLlm, binding.chevronLlm)
+        toggle(binding.headerHf, binding.bodyHf, binding.chevronHf)
+        toggle(binding.headerSearch, binding.bodySearch, binding.chevronSearch)
+        toggle(binding.headerGithub, binding.bodyGithub, binding.chevronGithub)
+        toggle(binding.headerSsh, binding.bodySsh, binding.chevronSsh)
     }
 
     /**

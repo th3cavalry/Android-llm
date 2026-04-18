@@ -46,6 +46,7 @@ class GeminiNanoBackend(private val context: Context) : InferenceBackend {
     override val modelFileHint: String =
         "No model file required — uses the system Gemini Nano model built into the OS.\n" +
         "Requires: Pixel 9 or newer, Android 15 (API 35)+."
+    override val estimatedMemoryMb: Int get() = if (ready) 512 else 0
 
     private var model: GenerativeModel? = null
     private var ready = false

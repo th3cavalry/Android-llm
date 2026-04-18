@@ -94,7 +94,7 @@
     <string name="command_hint">Enter command…</string>
 
     <!-- MCP Manager -->
-    <string name="no_mcp_servers">No MCP servers configured.\nTap + to add one.</string>
+    <string name="no_mcp_servers">No MCP servers configured.\nTap + to add one, or browse popular servers below.</string>
     <string name="add_mcp_server">Add MCP Server</string>
     <string name="server_name">Server name</string>
     <string name="server_url">Server URL (e.g. http://192.168.1.1:3000/mcp)</string>
@@ -103,6 +103,12 @@
     <string name="cancel">Cancel</string>
     <string name="delete">Delete</string>
     <string name="test_connection">Test Connection</string>
+    <string name="browse_servers">Browse Popular Servers</string>
+    <string name="browse_servers_title">Popular MCP Servers</string>
+    <string name="server_added">%s added to your servers</string>
+    <string name="server_already_exists">A server with this URL is already configured</string>
+    <string name="mcp_add_server_hint">MCP servers let the AI connect to external tools and services. You need a running MCP server — either self-hosted or a managed endpoint.</string>
+    <string name="mcp_url_hint">Use an SSE endpoint (e.g. https://server.example.com/sse) or a local server (http://localhost:3000/sse).</string>
 
     <!-- Menu -->
     <string name="action_settings">Settings</string>
@@ -188,8 +194,35 @@
         <item>Orange</item>
     </string-array>
 
+    <!-- Collapsible sections -->
+    <string name="collapse">Collapse</string>
+    <string name="expand">Expand</string>
+
     <!-- Permissions -->
     <string name="permissions_required">Permissions Required</string>
     <string name="permissions_explanation">This app needs storage permissions to download and access AI models. Without these permissions, model downloads and access may not work properly.</string>
     <string name="permissions_denied_warning">Some permissions were denied. Model download and access features may be limited.</string>
+
+    <!-- Help -->
+    <string name="help_title">Help &amp; Guide</string>
+    <string name="action_help">Help</string>
+
+    <string name="help_quick_start_title">Quick Start</string>
+    <string name="help_quick_start_body">1. Open Settings (gear icon) and choose an inference backend.\n\n2. For cloud APIs: enter an endpoint URL and API key. Use the Quick Cloud Provider Setup to auto-fill for OpenAI, Groq, or OpenRouter.\n\n3. For on-device models: pick MediaPipe or LiteRT-LM, then browse for a .task or .litertlm model file, or use the Model Browser to download one.\n\n4. Return to the chat screen and start typing!</string>
+
+    <string name="help_backends_title">Inference Backends</string>
+    <string name="help_backends_body">• Remote API — Connect to any OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter, Together AI, local Ollama, etc.).\n\n• MediaPipe — Run .task models directly on-device using Google\'s MediaPipe LLM framework.\n\n• LiteRT-LM — Run .litertlm models on-device with Google\'s LiteRT runtime.\n\n• Ollama (Local) — Connect to an Ollama instance running on your device or local network at localhost:11434.\n\n• Gemini Nano — Use Google\'s on-device Gemini Nano model (requires compatible device with AICore).</string>
+
+    <string name="help_mcp_title">MCP Servers</string>
+    <string name="help_mcp_body">MCP (Model Context Protocol) lets the AI use external tools and services.\n\n• Go to the MCP Servers screen (menu → MCP Servers)\n• Add your own server URL, or browse the curated catalog\n• Health indicators show connection status (green = ok, red = error)\n• The AI will automatically use available tools when relevant\n\nCommon MCP servers: GitHub, web search, file system access, databases, and more.</string>
+
+    <string name="help_tools_title">Built-in Tools</string>
+    <string name="help_tools_body">SovereignDroid includes several built-in tools the AI can use:\n\n• Web Search — Search DuckDuckGo, Brave, or SerpAPI\n• GitHub — Browse repos, issues, and pull requests\n• SSH — Execute commands on remote servers\n• Terminal — Run shell commands locally\n\nConfigure API keys in Settings to enable search and GitHub tools. Tool calls are shown in chat — toggle visibility in Settings → Chat Appearance.</string>
+
+    <string name="help_troubleshooting_title">Troubleshooting</string>
+    <string name="help_troubleshooting_body">Model won\'t load?\n• Check that the file format matches the backend (.task for MediaPipe, .litertlm for LiteRT-LM)\n• Ensure enough free RAM (close other apps)\n\nAPI errors?\n• Verify your endpoint URL and API key in Settings\n• OpenAI key format: sk-… / Groq: gsk_…\n• Check that the model name matches one offered by the provider\n\nMCP server offline?\n• Check the URL and ensure the server is running\n• Look at the health status dot (green/red) in MCP Servers\n\nApp feels slow?\n• Smaller on-device models run faster\n• Cloud backends are generally faster than on-device\n• Close unused MCP servers</string>
+
+    <string name="help_diagnostics_title">Diagnostics</string>
+    <string name="copy_diagnostics">Copy to clipboard</string>
+    <string name="diagnostics_copied">Diagnostics copied</string>
 </resources>

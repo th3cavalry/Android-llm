@@ -107,6 +107,10 @@ class ToolExecutor(private val context: Context) {
 
     // ─── MCP tools ────────────────────────────────────────────────────────────
 
+    /**
+     * Executes an MCP tool with retry logic for transient failures.
+     * Retries up to 2 times for connection-related errors.
+     */
     private suspend fun executeMcpTool(toolName: String, arguments: Map<String, Any?>): String {
         val parts = toolName.split("__", limit = 2)
         if (parts.size < 2) return "Invalid MCP tool name format: $toolName"
@@ -117,8 +121,54 @@ class ToolExecutor(private val context: Context) {
         val server = servers.find { it.name == serverName && it.enabled }
             ?: return "MCP server '$serverName' not found or disabled"
 
-        val client = MCPClient(server)
-        client.initialize()
-        return client.callTool(actualToolName, arguments)
+        var lastError: Exception? = null
+        val maxRetries = 2
+
+        for (attempt in 0..maxRetries) {
+            try {
+                val client = MCPClient(server)
+                client.initialize()
+                return client.callTool(actualToolName, arguments)
+            } catch (e: Exception) {
+                lastError = e
+                // Only retry on transient errors (connection, timeout)
+                val msg = e.message ?: ""
+                val isTransient = msg.contains("timeout", ignoreCase = true) ||
+                    msg.contains("ConnectException", ignoreCase = true) ||
+                    msg.contains("Connection reset", ignoreCase = true) ||
+                    msg.contains("SocketException", ignoreCase = true)
+                if (!isTransient || attempt == maxRetries) break
+                // Brief delay before retry
+                kotlinx.coroutines.delay(1000L * (attempt + 1))
+            }
+        }
+
+        return parseMcpToolError(lastError)
+    }
+
+    /**
+     * Parses MCP tool execution errors into structured, user-friendly messages
+     * with actionable hints for common error types.
+     */
+    private fun parseMcpToolError(e: Exception?): String {
+        if (e == null) return "MCP tool error: unknown failure"
+        val msg = e.message ?: "Unknown error"
+        return when {
+            msg.contains("UnknownHostException", ignoreCase = true) ->
+                "MCP tool error: Server not found. Check your network connection and server URL.\nDetails: $msg"
+            msg.contains("ConnectException", ignoreCase = true) ||
+            msg.contains("Connection refused", ignoreCase = true) ->
+                "MCP tool error: Connection refused. Is the MCP server running?\nDetails: $msg"
+            msg.contains("timeout", ignoreCase = true) ->
+                "MCP tool error: Request timed out after retries. The server may be overloaded.\nDetails: $msg"
+            msg.contains("401") || msg.contains("Unauthorized", ignoreCase = true) ->
+                "MCP tool error: Authentication failed. Check your server credentials.\nDetails: $msg"
+            msg.contains("403") || msg.contains("Forbidden", ignoreCase = true) ->
+                "MCP tool error: Access denied. You may need additional permissions.\nDetails: $msg"
+            msg.contains("MCP error:", ignoreCase = true) ->
+                "MCP tool error: ${msg.substringAfter("MCP error:").trim()}"
+            else ->
+                "MCP tool error: $msg"
+        }
     }
 }

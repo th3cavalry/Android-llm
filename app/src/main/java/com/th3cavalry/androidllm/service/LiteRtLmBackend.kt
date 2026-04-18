@@ -39,6 +39,7 @@ class LiteRtLmBackend(private val context: Context) : InferenceBackend {
         "Supports .litertlm format (Google's new on-device LLM SDK). " +
             "Recommended models: Gemma 4, Phi-4 Mini, Llama 3.2, Qwen 2.5. " +
             "Download from huggingface.co/litert-community"
+    override val estimatedMemoryMb: Int get() = if (engine != null) 2048 else 0
 
     private var engine: Engine? = null
 

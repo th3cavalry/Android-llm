@@ -27,6 +27,14 @@ interface InferenceBackend {
     val modelFileHint: String
 
     /**
+     * Estimated peak memory usage in MB when a model is loaded.
+     * Used by the memory manager to warn users before loading on low-RAM devices.
+     * Returns 0 if unknown (e.g. before a model is loaded).
+     */
+    val estimatedMemoryMb: Int
+        get() = 0
+
+    /**
      * Loads the model from [modelPath] (absolute file-system path).
      * Safe to call again to hot-swap to a different model; any previously
      * loaded model is released first.

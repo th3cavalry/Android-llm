@@ -29,6 +29,8 @@ import com.th3cavalry.androidllm.service.ToolExecutor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+import android.app.ActivityManager
+import android.content.Context
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -54,6 +56,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _error = MutableLiveData<String?>(null)
     val error: LiveData<String?> = _error
 
+    /** Memory warning shown to the user when available RAM is low. */
+    private val _memoryWarning = MutableLiveData<String?>(null)
+    val memoryWarning: LiveData<String?> = _memoryWarning
+
     /** Mutable conversation history (passed to the LLM each turn). */
     private val history: MutableList<ChatMessage> = mutableListOf()
 
@@ -68,6 +74,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** The currently running generation job, cancellable via [stopGeneration]. */
     private var currentJob: Job? = null
 
+    /** Callback registered with [App] to handle low-memory events from the system. */
+    private val memoryPressureHandler: () -> Unit = {
+        // If we're not actively generating, release the backend to free memory
+        if (_isLoading.value != true) {
+            activeBackend?.let { backend ->
+                android.util.Log.w("ChatViewModel", "Low memory: releasing ${backend.displayName}")
+                // App.releaseBackendCache() handles closing — just clear local ref
+                activeBackend = null
+                _memoryWarning.postValue("Low memory — model unloaded to free resources. It will reload on next message.")
+            }
+        }
+    }
+
     companion object {
         /** MediaPipe caps on-device generation; keep below the model's context window. */
         private const val MAX_ON_DEVICE_TOKENS = 1024
@@ -77,10 +96,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         private val toolCallCounter = AtomicInteger(0)
         /** Shared Gson instance — thread-safe for reading after construction. */
         private val gson = Gson()
+        /** Minimum available MB of RAM required to load an on-device model. */
+        private const val MIN_AVAILABLE_RAM_MB = 512
+        /** Maximum conversation history entries before applying a sliding window. */
+        private const val MAX_HISTORY_SIZE = 50
     }
 
     init {
         history.add(ChatMessage(role = MessageRole.SYSTEM, content = systemPrompt()))
+        // Register for system memory-pressure callbacks
+        (application as? com.th3cavalry.androidllm.App)?.addMemoryPressureListener(memoryPressureHandler)
     }
 
     /** Returns the user-configured system prompt, falling back to the built-in default. */
@@ -97,10 +122,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val userMsg = ChatMessage(role = MessageRole.USER, content = userText)
         history.add(userMsg)
+        trimHistoryIfNeeded()
         _messages.value = history.filterVisible()
 
         _isLoading.value = true
         _error.value = null
+        _memoryWarning.value = null
 
         val backendKey = Prefs.getString(
             getApplication(), Prefs.KEY_INFERENCE_BACKEND, Prefs.BACKEND_REMOTE
@@ -224,9 +251,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * active backend of a different type first.
      */
     private inline fun <reified T : InferenceBackend> getOrCreateBackend(): T {
+        // Check the application-level cache first (survives ViewModel recreation)
+        val app = getApplication<Application>() as? com.th3cavalry.androidllm.App
+        val cached = app?.cachedBackend
+        if (cached is T) {
+            activeBackend = cached
+            return cached
+        }
+
         val current = activeBackend
         if (current is T) return current
         current?.close()
+
+        // Check available RAM before loading a new on-device model
+        val availableMb = getAvailableMemoryMb()
+        if (availableMb < MIN_AVAILABLE_RAM_MB) {
+            _memoryWarning.postValue(
+                "Low memory warning: only ${availableMb} MB available. " +
+                "Model loading may fail on this device. Consider closing other apps."
+            )
+        }
+
         val newBackend: T = when (T::class) {
             OnDeviceInferenceService::class -> OnDeviceInferenceService(getApplication()) as T
             LiteRtLmBackend::class         -> LiteRtLmBackend(getApplication()) as T
@@ -234,7 +279,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             else -> error("Unknown backend type ${T::class.simpleName}")
         }
         activeBackend = newBackend
+        // Store in the app-level cache so the backend survives ViewModel recreation
+        app?.cacheBackend(newBackend)
         return newBackend
+    }
+
+    /**
+     * Returns the available device RAM in MB using [ActivityManager.MemoryInfo].
+     */
+    private fun getAvailableMemoryMb(): Long {
+        val activityManager = getApplication<Application>()
+            .getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memInfo)
+        return memInfo.availMem / (1024 * 1024)
+    }
+
+    /**
+     * Applies a sliding window to the conversation history when it exceeds
+     * [MAX_HISTORY_SIZE]. Keeps the system prompt and the most recent messages.
+     */
+    private fun trimHistoryIfNeeded() {
+        if (history.size <= MAX_HISTORY_SIZE) return
+        val systemPrompt = history.firstOrNull { it.role == MessageRole.SYSTEM }
+        val recentMessages = history.takeLast(MAX_HISTORY_SIZE - 1)
+        history.clear()
+        if (systemPrompt != null) history.add(systemPrompt)
+        history.addAll(recentMessages)
     }
 
     /**
@@ -585,6 +656,11 @@ After a tool result is given, continue reasoning. When you have the final answer
 
     override fun onCleared() {
         super.onCleared()
-        activeBackend?.close()
+        // Don't close the backend here — it's cached at the App level
+        // so it survives ViewModel recreation. The App will release it
+        // on memory pressure or process death.
+        activeBackend = null
+        (getApplication<Application>() as? com.th3cavalry.androidllm.App)
+            ?.removeMemoryPressureListener(memoryPressureHandler)
     }
 }

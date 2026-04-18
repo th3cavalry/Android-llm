@@ -34,6 +34,7 @@ class OnDeviceInferenceService(private val context: Context) : InferenceBackend 
     override val modelFileHint =
         "Supports .task format. Recommended: Gemma 2B-IT INT4 (~1.4 GB), Phi-2 (~1.6 GB), " +
             "Falcon 1B (~1 GB). Download .task files from kaggle.com/models/google/gemma"
+    override val estimatedMemoryMb: Int get() = if (llmInference != null) 2048 else 0
 
     private var llmInference: LlmInference? = null
 

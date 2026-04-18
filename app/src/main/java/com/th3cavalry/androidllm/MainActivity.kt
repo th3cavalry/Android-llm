@@ -149,6 +149,12 @@ class MainActivity : AppCompatActivity() {
                 Snackbar.make(binding.root, error, Snackbar.LENGTH_LONG).show()
             }
         }
+
+        viewModel.memoryWarning.observe(this) { warning ->
+            if (warning != null) {
+                Snackbar.make(binding.root, warning, Snackbar.LENGTH_LONG).show()
+            }
+        }
     }
 
     // ────────────────────────────────────────────────────────────
@@ -238,6 +244,10 @@ class MainActivity : AppCompatActivity() {
             }
             R.id.action_about -> {
                 startActivity(Intent(this, AboutActivity::class.java))
+                true
+            }
+            R.id.action_help -> {
+                startActivity(Intent(this, HelpActivity::class.java))
                 true
             }
             else -> super.onOptionsItemSelected(item)
