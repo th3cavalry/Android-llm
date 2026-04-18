@@ -3,7 +3,6 @@ package com.th3cavalry.androidllm.ui
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageButton
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.th3cavalry.androidllm.R
@@ -19,10 +18,9 @@ class SessionListAdapter(
 ) : RecyclerView.Adapter<SessionListAdapter.SessionViewHolder>() {
 
     inner class SessionViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val titleText: TextView = itemView.findViewById(R.id.sessionTitle)
-        val timestampText: TextView = itemView.findViewById(R.id.sessionTimestamp)
-        val previewText: TextView = itemView.findViewById(R.id.sessionPreview)
-        val menuButton: ImageButton = itemView.findViewById(R.id.sessionMenuButton)
+        val titleText: TextView = itemView.findViewById(R.id.tvSessionTitle)
+        val timestampText: TextView = itemView.findViewById(R.id.tvSessionDate)
+        val previewText: TextView = itemView.findViewById(R.id.tvMessageCount)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SessionViewHolder {
@@ -35,12 +33,13 @@ class SessionListAdapter(
         val session = sessions[position]
         
         holder.titleText.text = session.title
-        holder.timestampText.text = formatTimestamp(session.timestampMs)
+        holder.timestampText.text = formatTimestamp(session.timestamp)
         
-        // Show preview of first message or "No messages yet"
+        // Show message count or preview
         val preview = if (session.messages.isNotEmpty()) {
             val firstMsg = session.messages.first()
-            "${firstMsg.role}: ${firstMsg.content.take(50)}${if (firstMsg.content.length > 50) "..." else ""}"
+            val content = firstMsg.content ?: ""
+            "${firstMsg.role}: ${content.take(50)}${if (content.length > 50) "..." else ""}"
         } else {
             "No messages yet"
         }
@@ -48,10 +47,6 @@ class SessionListAdapter(
         
         holder.itemView.setOnClickListener {
             onSessionClick(session)
-        }
-        
-        holder.menuButton.setOnClickListener {
-            onSessionLongClick(session)
         }
         
         holder.itemView.setOnLongClickListener {

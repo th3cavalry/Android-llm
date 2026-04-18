@@ -267,6 +267,7 @@ class MainActivity : AppCompatActivity() {
         val rvSessions = dialogView.findViewById<RecyclerView>(R.id.rvSessions)
 
         var filteredSessions = allSessions.toList()
+        var dialog: AlertDialog? = null
         val adapter = SessionAdapter(filteredSessions) { session ->
             dialog?.dismiss()
             showSessionOptionsDialog(session.id, session.title)
@@ -274,8 +275,6 @@ class MainActivity : AppCompatActivity() {
 
         rvSessions.layoutManager = LinearLayoutManager(this)
         rvSessions.adapter = adapter
-
-        var dialog: AlertDialog? = null
 
         // Search/filter functionality
         etSearch.addTextChangedListener(object : android.text.TextWatcher {

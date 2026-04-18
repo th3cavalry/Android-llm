@@ -88,11 +88,12 @@ class OnDeviceInferenceService(private val context: Context) : InferenceBackend 
         val inference = llmInference
             ?: error("On-device model is not loaded. Configure a model path in Settings.")
         
-        inference.generateResponseAsync(prompt) { partialResult, error ->
-            if (error != null) {
-                close(error)
-            } else if (partialResult != null) {
+        inference.generateResponseAsync(prompt) { partialResult, done ->
+            if (partialResult != null) {
                 trySend(partialResult)
+            }
+            if (done) {
+                close()
             }
         }
         
