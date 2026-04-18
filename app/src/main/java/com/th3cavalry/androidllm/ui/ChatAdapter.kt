@@ -6,7 +6,8 @@ import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
+import android.widget.ImageView
+import android.widget.Button
 import android.widget.Toast
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -19,7 +20,9 @@ import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
 import io.noties.markwon.linkify.LinkifyPlugin
 
-class ChatAdapter : ListAdapter<ChatMessage, ChatAdapter.MessageViewHolder>(DiffCallback()) {
+class ChatAdapter(
+    private val onRetryError: ((ChatMessage) -> Unit)? = null
+) : ListAdapter<ChatMessage, ChatAdapter.MessageViewHolder>(DiffCallback()) {
 
     /** When true, the response-info footer (model · tokens · time) is shown under each reply. */
     var showResponseInfo: Boolean = false
@@ -37,10 +40,16 @@ class ChatAdapter : ListAdapter<ChatMessage, ChatAdapter.MessageViewHolder>(Diff
         private const val VIEW_ASSISTANT = 1
         private const val VIEW_TOOL_CALL = 2
         private const val VIEW_TOOL_RESULT = 3
+        private const val VIEW_ERROR = 4
+        private const val VIEW_TOOL_EXECUTING = 5
     }
 
     override fun getItemViewType(position: Int): Int {
         val msg = getItem(position)
+        // Tool executing state takes priority
+        if (msg.executingInfo != null) return VIEW_TOOL_EXECUTING
+        // Error messages take priority
+        if (msg.errorInfo != null) return VIEW_ERROR
         return when (msg.role) {
             MessageRole.USER -> VIEW_USER
             MessageRole.ASSISTANT -> if (msg.toolCalls != null) VIEW_TOOL_CALL else VIEW_ASSISTANT
@@ -55,6 +64,8 @@ class ChatAdapter : ListAdapter<ChatMessage, ChatAdapter.MessageViewHolder>(Diff
             VIEW_USER -> R.layout.item_message_user
             VIEW_TOOL_CALL -> R.layout.item_tool_call
             VIEW_TOOL_RESULT -> R.layout.item_tool_result
+            VIEW_ERROR -> R.layout.item_message_error
+            VIEW_TOOL_EXECUTING -> R.layout.item_tool_executing
             else -> R.layout.item_message_assistant
         }
         return MessageViewHolder(inflater.inflate(layout, parent, false), viewType)
@@ -81,6 +92,8 @@ class ChatAdapter : ListAdapter<ChatMessage, ChatAdapter.MessageViewHolder>(Diff
                 VIEW_ASSISTANT -> bindAssistant(message)
                 VIEW_TOOL_CALL -> bindToolCall(message)
                 VIEW_TOOL_RESULT -> bindToolResult(message)
+                VIEW_ERROR -> bindError(message)
+                VIEW_TOOL_EXECUTING -> bindToolExecuting(message)
             }
         }
 
@@ -92,7 +105,14 @@ class ChatAdapter : ListAdapter<ChatMessage, ChatAdapter.MessageViewHolder>(Diff
 
         private fun bindAssistant(message: ChatMessage) {
             val tv = itemView.findViewById<TextView>(R.id.tvContent)
-            markwon.setMarkdown(tv, message.content ?: "")
+            val content = message.content ?: ""
+            // Add typing cursor when streaming
+            val displayContent = if (message.isStreaming) {
+                "$content▋"  // Add blinking cursor effect
+            } else {
+                content
+            }
+            markwon.setMarkdown(tv, displayContent)
             tv.setOnLongClickListener { copyToClipboard(message.content) }
 
             val tvInfo = itemView.findViewById<TextView?>(R.id.tvResponseInfo)
@@ -134,6 +154,68 @@ class ChatAdapter : ListAdapter<ChatMessage, ChatAdapter.MessageViewHolder>(Diff
                 content.take(500) + "\n…(truncated, ${content.length} chars total)"
             } else {
                 content
+            }
+        }
+
+        private fun bindError(message: ChatMessage) {
+            val errorInfo = message.errorInfo ?: return
+            
+            val tvErrorMessage = itemView.findViewById<TextView>(R.id.tvErrorMessage)
+            val tvErrorDetails = itemView.findViewById<TextView>(R.id.tvErrorDetails)
+            val ivExpand = itemView.findViewById<ImageView>(R.id.ivExpand)
+            val btnRetry = itemView.findViewById<Button>(R.id.btnRetry)
+            
+            tvErrorMessage.text = errorInfo.message
+            
+            // Show details if available
+            if (!errorInfo.details.isNullOrBlank()) {
+                ivExpand.visibility = View.VISIBLE
+                tvErrorDetails.text = errorInfo.details
+                
+                var isExpanded = false
+                ivExpand.setOnClickListener {
+                    isExpanded = !isExpanded
+                    tvErrorDetails.visibility = if (isExpanded) View.VISIBLE else View.GONE
+                    ivExpand.rotation = if (isExpanded) 180f else 0f
+                }
+            } else {
+                ivExpand.visibility = View.GONE
+                tvErrorDetails.visibility = View.GONE
+            }
+            
+            // Show retry button if error is retryable
+            if (errorInfo.isRetryable && onRetryError != null) {
+                btnRetry.visibility = View.VISIBLE
+                btnRetry.setOnClickListener {
+                    onRetryError.invoke(message)
+                }
+            } else {
+                btnRetry.visibility = View.GONE
+            }
+        }
+
+        private fun bindToolExecuting(message: ChatMessage) {
+            val executingInfo = message.executingInfo ?: return
+            
+            val tvExecutingTool = itemView.findViewById<TextView>(R.id.tvExecutingTool)
+            val tvExecutingStatus = itemView.findViewById<TextView>(R.id.tvExecutingStatus)
+            
+            // Display tool name with icon
+            val icon = when {
+                executingInfo.toolName.contains("ssh") -> "🖥️"
+                executingInfo.toolName.contains("github") -> "📂"
+                executingInfo.toolName.contains("search") -> "🔍"
+                executingInfo.toolName.contains("fetch") -> "🌐"
+                else -> "⚙️"
+            }
+            tvExecutingTool.text = "$icon Executing ${executingInfo.toolName}..."
+            
+            // Show status if available
+            if (!executingInfo.status.isNullOrBlank()) {
+                tvExecutingStatus.visibility = View.VISIBLE
+                tvExecutingStatus.text = executingInfo.status
+            } else {
+                tvExecutingStatus.visibility = View.GONE
             }
         }
     }

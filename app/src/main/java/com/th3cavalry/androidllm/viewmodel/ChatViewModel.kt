@@ -9,11 +9,15 @@ import com.google.gson.Gson
 import com.th3cavalry.androidllm.Prefs
 import com.th3cavalry.androidllm.data.ChatMessage
 import com.th3cavalry.androidllm.data.ChatSession
+import com.th3cavalry.androidllm.data.ConnectionError
 import com.th3cavalry.androidllm.data.FunctionCallData
 import com.th3cavalry.androidllm.data.MCPServer
 import com.th3cavalry.androidllm.data.MessageRole
+import com.th3cavalry.androidllm.data.NetworkError
 import com.th3cavalry.androidllm.data.ResponseInfo
+import com.th3cavalry.androidllm.data.TimeoutError
 import com.th3cavalry.androidllm.data.ToolCallData
+import com.th3cavalry.androidllm.data.toAppError
 import com.th3cavalry.androidllm.network.dto.ToolDto
 import com.th3cavalry.androidllm.service.GeminiNanoBackend
 import com.th3cavalry.androidllm.service.InferenceBackend
@@ -117,7 +121,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _error.postValue("Error: ${e.message}")
+                
+                // Add error message to chat history
+                val appError = e.toAppError()
+                val isRetryable = appError is NetworkError || appError is TimeoutError || appError is ConnectionError
+                
+                history.add(ChatMessage(
+                    role = MessageRole.ASSISTANT,
+                    content = null,
+                    errorInfo = com.th3cavalry.androidllm.data.ErrorInfo(
+                        message = appError.message,
+                        details = e.stackTraceToString().take(500),
+                        category = appError.category,
+                        isRetryable = isRetryable,
+                        originalMessage = userText
+                    )
+                ))
+                _messages.postValue(history.filterVisible())
+                
+                // Also set error for Snackbar (backward compatibility)
+                _error.postValue("Error: ${appError.message}")
             } finally {
                 _isLoading.postValue(false)
                 autoSaveSession()
@@ -135,6 +158,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.postValue(false)
         }
         job.cancel()
+    }
+
+    /** Retries a failed message by resending the original user message. */
+    fun retryMessage(errorMessage: ChatMessage) {
+        val originalText = errorMessage.errorInfo?.originalMessage ?: return
+        // Remove the error message from history
+        history.removeAll { it === errorMessage }
+        _messages.value = history.filterVisible()
+        // Resend the original message
+        sendMessage(originalText)
     }
 
     /** Clears the conversation (keeps the system prompt) and resets the session ID. */
@@ -286,19 +319,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             iterations++
 
             val fullPrompt = buildOnDeviceSystemPrompt(toolDescriptions) + context
-            val rawResponse = backend.generate(fullPrompt).trim()
+            
+            // Create a placeholder streaming message
+            val streamingMessage = ChatMessage(
+                role = MessageRole.ASSISTANT,
+                content = "",
+                isStreaming = true
+            )
+            history.add(streamingMessage)
+            _messages.postValue(history.filterVisible())
+            
+            // Collect streamed tokens and accumulate the response
+            val rawResponse = StringBuilder()
+            backend.generateStream(fullPrompt).collect { token ->
+                rawResponse.append(token)
+                // Update the streaming message with accumulated content
+                val updatedMessage = streamingMessage.copy(content = rawResponse.toString())
+                history[history.lastIndexOf(streamingMessage)] = updatedMessage
+                _messages.postValue(history.filterVisible())
+            }
+            
+            // Mark streaming complete and finalize the message
+            val finalMessage = streamingMessage.copy(
+                content = rawResponse.toString().trim(),
+                isStreaming = false
+            )
+            history[history.lastIndexOf(streamingMessage)] = finalMessage
+            _messages.postValue(history.filterVisible())
+            
+            val trimmedResponse = rawResponse.toString().trim()
 
             // Extract JSON between <tool_call> ... </tool_call> using simple string search
             // rather than regex to correctly handle nested braces in the JSON body.
             // Case-sensitive: the prompt instructs the model to use these exact lowercase tags.
-            val startIdx = rawResponse.indexOf(toolCallStartTag)
-            val endIdx = rawResponse.indexOf(toolCallEndTag)
+            val startIdx = trimmedResponse.indexOf(toolCallStartTag)
+            val endIdx = trimmedResponse.indexOf(toolCallEndTag)
             val toolCallJson = if (startIdx >= 0 && endIdx > startIdx) {
                 // Only treat as tool call if the tag is at the beginning (after trimming)
                 // This prevents false positives when the model includes tags in plain text responses
-                val trimmedResponse = rawResponse.trim()
                 if (trimmedResponse.startsWith(toolCallStartTag)) {
-                    rawResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
+                    trimmedResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
                 } else {
                     null  // Tags not at start, treat as plain text
                 }
@@ -318,18 +378,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (toolCallMap == null) {
                     // Gson returned null (e.g., empty JSON); skip and treat as final answer
-                    val finalText = rawResponse.trimAssistantPrefix()
+                    // The streaming message is already in history, just update with metadata
                     val durationMs = System.currentTimeMillis() - startMs
-                    history.add(ChatMessage(
-                        role = MessageRole.ASSISTANT,
+                    val finalText = trimmedResponse.trimAssistantPrefix()
+                    val updatedFinal = finalMessage.copy(
                         content = finalText,
                         responseInfo = ResponseInfo(backend.displayName, null, durationMs)
-                    ))
+                    )
+                    history[history.lastIndexOf(finalMessage)] = updatedFinal
                     _messages.postValue(history.filterVisible())
                     completedNormally = true
                     break
                 }
 
+                // Remove the streaming message since we have a tool call
+                history.remove(finalMessage)
+                
                 val toolName = toolCallMap["name"]?.toString() ?: ""
                 @Suppress("UNCHECKED_CAST")
                 val toolArgs = toolCallMap["arguments"]
@@ -353,12 +417,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 _messages.postValue(history.filterVisible())
 
+                // Show executing state
+                val executingMessage = ChatMessage(
+                    role = MessageRole.ASSISTANT,
+                    content = null,
+                    executingInfo = com.th3cavalry.androidllm.data.ExecutingInfo(
+                        toolName = toolName,
+                        status = getToolExecutingStatus(toolName)
+                    )
+                )
+                history.add(executingMessage)
+                _messages.postValue(history.filterVisible())
+
                 // Execute the tool
                 val toolResult = runCatching {
                     executor.execute(toolName, toolArgs)
                 }.getOrElse { "Error: ${it.message}" }
 
-                // Show the tool result in the chat UI
+                // Remove executing message and show the tool result
+                history.remove(executingMessage)
                 history.add(
                     ChatMessage(
                         role = MessageRole.TOOL,
@@ -376,12 +453,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             } else {
                 // No tool call tag found → final answer
+                // The streaming message is already in history, just update with metadata
                 val durationMs = System.currentTimeMillis() - startMs
-                history.add(ChatMessage(
-                    role = MessageRole.ASSISTANT,
-                    content = rawResponse.trimAssistantPrefix(),
+                val finalText = trimmedResponse.trimAssistantPrefix()
+                val updatedFinal = finalMessage.copy(
+                    content = finalText,
                     responseInfo = ResponseInfo(backend.displayName, null, durationMs)
-                ))
+                )
+                history[history.lastIndexOf(finalMessage)] = updatedFinal
                 _messages.postValue(history.filterVisible())
                 completedNormally = true
                 break
@@ -458,8 +537,7 @@ After a tool result is given, continue reasoning. When you have the final answer
         return tools
     }
 
-    /**
-     * Filters messages for display, respecting the hide-tool-messages preference
+    /** Filters messages for display, respecting the hide-tool-messages preference
      * and always removing the SYSTEM prompt.
      */
     private fun List<ChatMessage>.filterVisible(): List<ChatMessage> {
@@ -469,8 +547,22 @@ After a tool result is given, continue reasoning. When you have the final answer
                 msg.role == MessageRole.SYSTEM -> false
                 hideTools && msg.role == MessageRole.TOOL -> false
                 hideTools && msg.role == MessageRole.ASSISTANT && msg.toolCalls != null -> false
+                // Never hide executing messages
+                msg.executingInfo != null -> true
                 else -> true
             }
+        }
+    }
+
+    /** Returns a status message for the executing tool based on its type. */
+    private fun getToolExecutingStatus(toolName: String): String? {
+        return when {
+            toolName.contains("ssh") -> "Connecting to remote server..."
+            toolName.contains("github") -> "Accessing GitHub API..."
+            toolName.contains("search") -> "Searching the web..."
+            toolName.contains("fetch") -> "Fetching URL content..."
+            toolName.contains("__") -> "Calling MCP server..."
+            else -> null
         }
     }
 

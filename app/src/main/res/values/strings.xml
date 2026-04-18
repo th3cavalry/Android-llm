@@ -162,6 +162,14 @@
     <string name="session_open">Open</string>
     <string name="session_rename">Rename</string>
     <string name="rename">Rename</string>
+    <string name="search_sessions">Search your saved chats</string>
+    <string name="search_hint">Type to filter…</string>
+    <string name="export_session">Export</string>
+    <string name="export_as_json">Export as JSON</string>
+    <string name="export_as_text">Export as Text</string>
+    <string name="export_success">Exported to %s</string>
+    <string name="export_failed">Export failed: %s</string>
+    <string name="message_count">%d messages</string>
 
     <!-- Search providers -->
     <string-array name="search_providers">

@@ -7,14 +7,18 @@ import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.TextView
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.snackbar.Snackbar
+import com.th3cavalry.androidllm.data.ChatSession
 import com.th3cavalry.androidllm.databinding.ActivityMainBinding
 import com.th3cavalry.androidllm.ui.ChatAdapter
 import com.th3cavalry.androidllm.viewmodel.ChatViewModel
@@ -26,7 +30,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: ChatViewModel by viewModels()
-    private val chatAdapter = ChatAdapter()
+    private val chatAdapter by lazy {
+        ChatAdapter(onRetryError = { errorMessage ->
+            viewModel.retryMessage(errorMessage)
+        })
+    }
 
     /** Theme index that was active when this Activity was (last) created. */
     private var appliedThemeIndex: Int = 0
@@ -238,30 +246,98 @@ class MainActivity : AppCompatActivity() {
 
     /** Shows the saved chat history in a dialog; lets the user open, rename, or delete a session. */
     private fun showChatHistoryDialog() {
-        val sessions = Prefs.getSavedSessions(this)
-        if (sessions.isEmpty()) {
+        val allSessions = Prefs.getSavedSessions(this)
+        if (allSessions.isEmpty()) {
             Snackbar.make(binding.root, getString(R.string.no_saved_chats), Snackbar.LENGTH_SHORT).show()
             return
         }
-        val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
-        val titles = sessions.map { s ->
-            "${s.title.take(50)}\n${fmt.format(Date(s.timestamp))}"
-        }.toTypedArray()
 
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.chat_history_title))
-            .setItems(titles) { _, idx ->
-                showSessionOptionsDialog(sessions[idx].id, sessions[idx].title)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_session_list, null)
+        val etSearch = dialogView.findViewById<EditText>(R.id.etSearchSessions)
+        val rvSessions = dialogView.findViewById<RecyclerView>(R.id.rvSessions)
+
+        var filteredSessions = allSessions.toList()
+        val adapter = SessionAdapter(filteredSessions) { session ->
+            dialog?.dismiss()
+            showSessionOptionsDialog(session.id, session.title)
+        }
+
+        rvSessions.layoutManager = LinearLayoutManager(this)
+        rvSessions.adapter = adapter
+
+        var dialog: AlertDialog? = null
+
+        // Search/filter functionality
+        etSearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val query = s.toString().lowercase()
+                filteredSessions = if (query.isBlank()) {
+                    allSessions
+                } else {
+                    allSessions.filter { session ->
+                        session.title.lowercase().contains(query) ||
+                        session.messages.any { it.content?.lowercase()?.contains(query) == true }
+                    }
+                }
+                adapter.updateSessions(filteredSessions)
             }
+        })
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.chat_history_title))
+            .setView(dialogView)
             .setNeutralButton(getString(R.string.cancel), null)
             .show()
     }
 
-    /** Shows Open / Rename / Delete options for a single saved session. */
+    /** RecyclerView adapter for displaying session list with search. */
+    private inner class SessionAdapter(
+        private var sessions: List<ChatSession>,
+        private val onSessionClick: (ChatSession) -> Unit
+    ) : RecyclerView.Adapter<SessionAdapter.SessionViewHolder>() {
+
+        private val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
+
+        fun updateSessions(newSessions: List<ChatSession>) {
+            sessions = newSessions
+            notifyDataSetChanged()
+        }
+
+        inner class SessionViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+            val tvTitle: TextView = view.findViewById(R.id.tvSessionTitle)
+            val tvDate: TextView = view.findViewById(R.id.tvSessionDate)
+            val tvCount: TextView = view.findViewById(R.id.tvMessageCount)
+
+            init {
+                view.setOnClickListener {
+                    onSessionClick(sessions[adapterPosition])
+                }
+            }
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SessionViewHolder {
+            val view = layoutInflater.inflate(R.layout.item_session, parent, false)
+            return SessionViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: SessionViewHolder, position: Int) {
+            val session = sessions[position]
+            holder.tvTitle.text = session.title
+            holder.tvDate.text = fmt.format(Date(session.timestamp))
+            holder.tvCount.text = getString(R.string.message_count, session.messages.size)
+        }
+
+        override fun getItemCount() = sessions.size
+    }
+
+    /** Shows Open / Rename / Delete / Export options for a single saved session. */
     private fun showSessionOptionsDialog(sessionId: Long, sessionTitle: String) {
         val options = arrayOf(
             getString(R.string.session_open),
             getString(R.string.session_rename),
+            getString(R.string.export_session),
             getString(R.string.delete)
         )
         AlertDialog.Builder(this)
@@ -273,7 +349,8 @@ class MainActivity : AppCompatActivity() {
                         if (session != null) viewModel.loadSession(session)
                     }
                     1 -> showRenameSessionDialog(sessionId, sessionTitle)
-                    2 -> {
+                    2 -> showExportFormatDialog(sessionId)
+                    3 -> {
                         AlertDialog.Builder(this)
                             .setMessage(getString(R.string.delete_chat_confirm))
                             .setPositiveButton(getString(R.string.delete)) { _, _ ->
@@ -286,6 +363,87 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(getString(R.string.cancel), null)
             .show()
+    }
+
+    /** Shows export format selection dialog (JSON or Text). */
+    private fun showExportFormatDialog(sessionId: Long) {
+        val formats = arrayOf(
+            getString(R.string.export_as_json),
+            getString(R.string.export_as_text)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.export_session))
+            .setItems(formats) { _, which ->
+                val session = Prefs.getSavedSessions(this).firstOrNull { it.id == sessionId }
+                if (session != null) {
+                    when (which) {
+                        0 -> exportSessionAsJson(session)
+                        1 -> exportSessionAsText(session)
+                    }
+                }
+            }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
+    }
+
+    /** Exports a session as JSON to the Downloads folder. */
+    private fun exportSessionAsJson(session: ChatSession) {
+        try {
+            val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
+            val json = gson.toJson(session)
+            val filename = "chat_${session.id}.json"
+            val file = saveToDownloads(filename, json)
+            Snackbar.make(binding.root, getString(R.string.export_success, file.name), Snackbar.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Snackbar.make(binding.root, getString(R.string.export_failed, e.message), Snackbar.LENGTH_LONG).show()
+        }
+    }
+
+    /** Exports a session as plain text to the Downloads folder. */
+    private fun exportSessionAsText(session: ChatSession) {
+        try {
+            val sb = StringBuilder()
+            sb.appendLine("# ${session.title}")
+            sb.appendLine("Saved: ${SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(session.timestamp))}")
+            sb.appendLine()
+
+            for (msg in session.messages) {
+                when (msg.role) {
+                    com.th3cavalry.androidllm.data.MessageRole.USER -> {
+                        sb.appendLine("USER:")
+                        sb.appendLine(msg.content ?: "")
+                        sb.appendLine()
+                    }
+                    com.th3cavalry.androidllm.data.MessageRole.ASSISTANT -> {
+                        sb.appendLine("ASSISTANT:")
+                        sb.appendLine(msg.content ?: "")
+                        sb.appendLine()
+                    }
+                    com.th3cavalry.androidllm.data.MessageRole.TOOL -> {
+                        sb.appendLine("[TOOL: ${msg.toolName}]")
+                        sb.appendLine(msg.content?.take(500) ?: "")
+                        sb.appendLine()
+                    }
+                    else -> {}
+                }
+            }
+
+            val filename = "chat_${session.id}.txt"
+            val file = saveToDownloads(filename, sb.toString())
+            Snackbar.make(binding.root, getString(R.string.export_success, file.name), Snackbar.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Snackbar.make(binding.root, getString(R.string.export_failed, e.message), Snackbar.LENGTH_LONG).show()
+        }
+    }
+
+    /** Saves content to the Downloads folder. */
+    private fun saveToDownloads(filename: String, content: String): java.io.File {
+        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS
+        )
+        val file = java.io.File(downloadsDir, filename)
+        file.writeText(content)
+        return file
     }
 
     /** Shows an EditText dialog that lets the user rename a saved session. */

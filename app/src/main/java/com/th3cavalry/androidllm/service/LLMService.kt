@@ -98,6 +98,18 @@ class LLMService(private val context: Context) {
                 // Execute each tool call
                 val executor = ToolExecutor(context)
                 for (toolCall in message.toolCalls) {
+                    // Show executing state
+                    val executingMessage = ChatMessage(
+                        role = MessageRole.ASSISTANT,
+                        content = null,
+                        executingInfo = com.th3cavalry.androidllm.data.ExecutingInfo(
+                            toolName = toolCall.function.name,
+                            status = getToolExecutingStatus(toolCall.function.name)
+                        )
+                    )
+                    history.add(executingMessage)
+                    onProgress?.invoke(history.toList())
+
                     val result = try {
                         val args = gson.fromJson(toolCall.function.arguments, Map::class.java)
                             ?.mapKeys { it.key.toString() }
@@ -108,6 +120,8 @@ class LLMService(private val context: Context) {
                         "Error executing tool ${toolCall.function.name}: ${e.message}"
                     }
 
+                    // Remove executing message and add result
+                    history.remove(executingMessage)
                     history.add(
                         ChatMessage(
                             role = MessageRole.TOOL,
@@ -267,5 +281,17 @@ You are a powerful AI assistant running on Android with access to several tools:
 
 Use tools proactively when needed to give accurate, helpful responses. For SSH tasks, always confirm success. For GitHub operations, always verify the content before writing.
         """.trimIndent()
+
+        /** Returns a status message for the executing tool based on its type. */
+        private fun getToolExecutingStatus(toolName: String): String? {
+            return when {
+                toolName.contains("ssh") -> "Connecting to remote server..."
+                toolName.contains("github") -> "Accessing GitHub API..."
+                toolName.contains("search") -> "Searching the web..."
+                toolName.contains("fetch") -> "Fetching URL content..."
+                toolName.contains("__") -> "Calling MCP server..."
+                else -> null
+            }
+        }
     }
 }

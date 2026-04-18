@@ -17,7 +17,29 @@ data class ChatMessage(
     /** Display name for tool results shown in the UI */
     val toolName: String? = null,
     /** Optional metadata shown under assistant responses (model, tokens, time). */
-    val responseInfo: ResponseInfo? = null
+    val responseInfo: ResponseInfo? = null,
+    /** Error information if this message represents an error */
+    val errorInfo: ErrorInfo? = null,
+    /** Tool execution progress information */
+    val executingInfo: ExecutingInfo? = null,
+    /** Whether this message is currently being streamed (for typing indicator) */
+    val isStreaming: Boolean = false
+)
+
+/** Metadata for tools currently being executed */
+data class ExecutingInfo(
+    val toolName: String,
+    val status: String? = null,  // Optional status message for long-running operations
+    val startTimeMs: Long = System.currentTimeMillis()
+)
+
+/** Metadata for error messages displayed in chat */
+data class ErrorInfo(
+    val message: String,
+    val details: String? = null,
+    val category: ErrorCategory? = null,
+    val isRetryable: Boolean = false,
+    val originalMessage: String? = null // Store the user message that caused the error
 )
 
 /** Metadata attached to the final assistant response message. */
