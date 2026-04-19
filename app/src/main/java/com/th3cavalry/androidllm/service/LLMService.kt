@@ -191,7 +191,7 @@ class LLMService(private val context: Context) {
                 ToolCallDto(
                     id = tc.id,
                     type = tc.type,
-                    function = FunctionCallDto(tc.function.name, tc.function.arguments)
+                    function = FunctionCallDto(tc.function.name, tc.function.arguments.toString())
                 )
             },
             toolCallId = msg.toolCallId

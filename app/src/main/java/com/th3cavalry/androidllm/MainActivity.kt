@@ -484,7 +484,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.export_session))
             .setItems(formats) { _, which ->
-                androidx.lifecycle.lifecycleScope.launch {
+                kotlinx.coroutines.GlobalScope.launch {
                     val session = viewModel.getSessionForExport(sessionId)
                     if (session != null) {
                         when (which) {
