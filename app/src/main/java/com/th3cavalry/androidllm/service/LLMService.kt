@@ -86,7 +86,7 @@ class LLMService(private val context: Context) {
                 history.add(
                     ChatMessage(
                         role = MessageRole.ASSISTANT,
-                        content = message.content,
+                        content = message.content as? String,
                         toolCalls = message.toolCalls.map { tc ->
                             ToolCallData(
                                 id = tc.id,
@@ -151,7 +151,7 @@ class LLMService(private val context: Context) {
             }
 
             // Plain text response — we're done
-            val finalText = message.content ?: "(no response)"
+            val finalText = (message.content as? String) ?: "(no response)"
             val durationMs = System.currentTimeMillis() - startMs
             val responseInfo = ResponseInfo(
                 model = body.model ?: model(),
@@ -191,7 +191,7 @@ class LLMService(private val context: Context) {
                 ToolCallDto(
                     id = tc.id,
                     type = tc.type,
-                    function = FunctionCallDto(tc.function.name, tc.function.arguments.toString())
+                    function = FunctionCallDto(tc.function.name, tc.function.arguments)
                 )
             },
             toolCallId = msg.toolCallId
