@@ -14,8 +14,8 @@ android {
         applicationId = "com.th3cavalry.androidllm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "0.4.0-beta.2"
+        versionCode = 12
+        versionName = "0.4.0-beta.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
