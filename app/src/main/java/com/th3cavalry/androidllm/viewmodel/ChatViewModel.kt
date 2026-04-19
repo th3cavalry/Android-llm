@@ -27,6 +27,8 @@ import com.th3cavalry.androidllm.service.LiteRtLmBackend
 import com.th3cavalry.androidllm.service.MCPClient
 import com.th3cavalry.androidllm.service.OnDeviceInferenceService
 import com.th3cavalry.androidllm.service.ToolExecutor
+import com.th3cavalry.androidllm.service.VoiceService
+import com.th3cavalry.androidllm.service.VectorDatabaseService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -36,15 +38,6 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * ViewModel that manages the chat session and the agentic tool-calling loop.
- * Supports multiple inference modes controlled by [Prefs.KEY_INFERENCE_BACKEND]:
- *  - **Remote** (default): calls any OpenAI-compatible API endpoint via [LLMService].
- *  - **MediaPipe**: runs a local .task model via [OnDeviceInferenceService].
- *  - **LiteRT-LM**: runs a local .litertlm model via [LiteRtLmBackend].
- *  - **Ollama on-device**: routes through [LLMService] pointed at localhost:11434
- *    (Ollama must be running in Termux on the same device).
- *
- * The on-device backends use a ReAct-style text-based tool-calling loop; the
- * remote path uses native OpenAI function-calling.
  */
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -61,6 +54,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _memoryWarning = MutableLiveData<String?>(null)
     val memoryWarning: LiveData<String?> = _memoryWarning
 
+    private val _isListening = MutableLiveData(false)
+    val isListening: LiveData<Boolean> = _isListening
+
     /** Mutable conversation history (passed to the LLM each turn). */
     private val history: MutableList<ChatMessage> = mutableListOf()
 
@@ -71,6 +67,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Room-backed repository for chat session persistence. */
     private val chatRepo = ChatRepository(application)
+
+    private val voiceService = VoiceService(application)
+    private val vectorDbService = VectorDatabaseService(application)
 
     /** Optional document context injected via RAG file loading. */
     private val _documentContext = MutableLiveData<String?>(null)
@@ -96,17 +95,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        /** MediaPipe caps on-device generation; keep below the model's context window. */
         private const val MAX_ON_DEVICE_TOKENS = 1024
-        /** Max tool-call iterations before giving up (both remote and on-device). */
         private const val MAX_REACT_ITERATIONS = 10
-        /** Counter for generating unique on-device tool-call IDs. */
         private val toolCallCounter = AtomicInteger(0)
-        /** Shared Gson instance — thread-safe for reading after construction. */
         private val gson = Gson()
-        /** Minimum available MB of RAM required to load an on-device model. */
         private const val MIN_AVAILABLE_RAM_MB = 512
-        /** Maximum conversation history entries before applying a sliding window. */
         private const val MAX_HISTORY_SIZE = 50
     }
 
@@ -116,7 +109,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         (application as? com.th3cavalry.androidllm.App)?.addMemoryPressureListener(memoryPressureHandler)
     }
 
-    /** Returns the user-configured system prompt, falling back to the built-in default. */
     private fun systemPrompt(): String {
         val base = Prefs.getString(getApplication(), Prefs.KEY_SYSTEM_PROMPT)
             .ifBlank { LLMService.SYSTEM_PROMPT }
@@ -128,19 +120,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Sets or clears document context loaded via the document picker. */
     fun setDocumentContext(content: String?) {
         _documentContext.value = content
-        // Update the system prompt in history to reflect the new context
         if (history.isNotEmpty() && history[0].role == MessageRole.SYSTEM) {
             history[0] = ChatMessage(role = MessageRole.SYSTEM, content = systemPrompt())
         }
     }
 
-    /**
-     * Sends the user's message and runs the appropriate agentic loop based on
-     * the currently selected inference backend.
-     */
     fun sendMessage(userText: String, imageUri: String? = null) {
         if (userText.isBlank() || _isLoading.value == true || currentJob?.isActive == true) return
 
@@ -163,17 +149,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     Prefs.BACKEND_MEDIAPIPE -> runOnDeviceLoop(userText, getOrCreateBackend<OnDeviceInferenceService>())
                     Prefs.BACKEND_LITERT_LM -> runOnDeviceLoop(userText, getOrCreateBackend<LiteRtLmBackend>())
                     Prefs.BACKEND_GEMINI_NANO -> runOnDeviceLoop(userText, getOrCreateBackend<GeminiNanoBackend>())
-                    Prefs.BACKEND_OLLAMA_LOCAL -> {
-                        // Ollama runs on the device as a local server; treat it as a remote call
-                        // pointed at localhost:11434. The endpoint is already configured in Settings.
-                        runRemoteLoop()
-                    }
-                    else -> runRemoteLoop() // BACKEND_REMOTE (default)
+                    Prefs.BACKEND_OLLAMA_LOCAL -> runRemoteLoop()
+                    else -> runRemoteLoop()
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 
-                // Add error message to chat history
                 val appError = e.toAppError()
                 val isRetryable = appError is NetworkError || appError is TimeoutError || appError is ConnectionError
                 
@@ -189,8 +170,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 ))
                 _messages.postValue(history.filterVisible())
-                
-                // Also set error for Snackbar (backward compatibility)
                 _error.postValue("Error: ${appError.message}")
             } finally {
                 _isLoading.postValue(false)
@@ -199,29 +178,51 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Cancels the currently running generation, if any. */
     fun stopGeneration() {
         val job = currentJob ?: return
         currentJob = null
-        // Use invokeOnCompletion to ensure UI is only disabled after the job truly completes.
-        // This prevents concurrent state mutations if the job is still running after cancel().
         job.invokeOnCompletion {
             _isLoading.postValue(false)
         }
         job.cancel()
     }
 
-    /** Retries a failed message by resending the original user message. */
+    // ─── Voice Interaction ───────────────────────────────────────────────────
+
+    fun startListening() {
+        _isListening.value = true
+        voiceService.startListening(
+            onResult = { text ->
+                _isListening.postValue(false)
+                sendMessage(text)
+            },
+            onError = { err ->
+                _isListening.postValue(false)
+                _error.postValue(err)
+            }
+        )
+    }
+
+    fun stopListening() {
+        _isListening.value = false
+        voiceService.stopListening()
+    }
+
+    fun speak(text: String) {
+        voiceService.speak(text)
+    }
+
+    fun stopVoice() {
+        voiceService.stopSpeech()
+    }
+
     fun retryMessage(errorMessage: ChatMessage) {
         val originalText = errorMessage.errorInfo?.originalMessage ?: return
-        // Remove the error message from history
         history.removeAll { it === errorMessage }
         _messages.value = history.filterVisible()
-        // Resend the original message
         sendMessage(originalText)
     }
 
-    /** Clears the conversation (keeps the system prompt) and resets the session ID. */
     fun clearHistory() {
         history.clear()
         history.add(ChatMessage(role = MessageRole.SYSTEM, content = systemPrompt()))
@@ -229,10 +230,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         activeSessionId = System.currentTimeMillis()
     }
 
-    /** Saves the current chat session to persistent storage.
-     * Persists the full history (including tool messages) so saved chats are independent
-     * of display preferences. filterVisible() is applied only during rendering.
-     */
     fun saveCurrentSession() {
         val sessionMessages = history.filter { it.role != MessageRole.SYSTEM }
         if (sessionMessages.isEmpty()) return
@@ -247,7 +244,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Loads a previously saved session into the active chat. */
     fun loadSession(session: ChatSession) {
         history.clear()
         history.add(ChatMessage(role = MessageRole.SYSTEM, content = systemPrompt()))
@@ -256,30 +252,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _messages.value = history.filterVisible()
     }
 
-    /** Observable session list backed by Room. */
     val savedSessions: LiveData<List<ChatSession>> = chatRepo.observeSessions()
 
-    /** Loads a session by ID from Room and opens it. */
     fun loadSessionById(id: Long) {
         viewModelScope.launch {
             chatRepo.getSession(id)?.let { loadSession(it) }
         }
     }
 
-    /** Deletes a session by ID from Room. */
     fun deleteSession(id: Long) {
         viewModelScope.launch { chatRepo.deleteSession(id) }
     }
 
-    /** Renames a session in Room. */
     fun renameSession(id: Long, title: String) {
         viewModelScope.launch { chatRepo.renameSession(id, title) }
     }
 
-    /** Returns a session from Room for export. */
     suspend fun getSessionForExport(id: Long): ChatSession? = chatRepo.getSession(id)
 
-    /** One-time migration: moves sessions from SharedPreferences into Room. */
     fun migrateFromPrefsIfNeeded() {
         viewModelScope.launch {
             if (chatRepo.sessionCount() > 0) return@launch
@@ -288,12 +278,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             for (session in legacy) {
                 chatRepo.saveSession(session)
             }
-            // Clear SharedPreferences sessions after migration
-            android.util.Log.i("ChatViewModel", "Migrated ${legacy.size} sessions from SharedPreferences to Room")
         }
     }
-
-    // ─── Remote loop ───────────────────────────────────────────────────────────
 
     private suspend fun runRemoteLoop() {
         val tools = buildToolsList()
@@ -307,14 +293,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _messages.postValue(history.filterVisible())
     }
 
-    // ─── On-device loop (ReAct pattern) ───────────────────────────────────────
-
-    /**
-     * Lazily creates or reuses the backend of type [T], releasing any previously
-     * active backend of a different type first.
-     */
     private inline fun <reified T : InferenceBackend> getOrCreateBackend(): T {
-        // Check the application-level cache first (survives ViewModel recreation)
         val app = getApplication<Application>() as? com.th3cavalry.androidllm.App
         val cached = app?.cachedBackend
         if (cached is T) {
@@ -326,12 +305,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (current is T) return current
         current?.close()
 
-        // Check available RAM before loading a new on-device model
         val availableMb = getAvailableMemoryMb()
         if (availableMb < MIN_AVAILABLE_RAM_MB) {
             _memoryWarning.postValue(
                 "Low memory warning: only ${availableMb} MB available. " +
-                "Model loading may fail on this device. Consider closing other apps."
+                "Model loading may fail on this device."
             )
         }
 
@@ -339,17 +317,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             OnDeviceInferenceService::class -> OnDeviceInferenceService(getApplication()) as T
             LiteRtLmBackend::class         -> LiteRtLmBackend(getApplication()) as T
             GeminiNanoBackend::class       -> GeminiNanoBackend(getApplication()) as T
-            else -> error("Unknown backend type ${T::class.simpleName}")
+            else -> error("Unknown backend type")
         }
         activeBackend = newBackend
-        // Store in the app-level cache so the backend survives ViewModel recreation
         app?.cacheBackend(newBackend)
         return newBackend
     }
 
-    /**
-     * Returns the available device RAM in MB using [ActivityManager.MemoryInfo].
-     */
     private fun getAvailableMemoryMb(): Long {
         val activityManager = getApplication<Application>()
             .getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -358,10 +332,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return memInfo.availMem / (1024 * 1024)
     }
 
-    /**
-     * Applies a sliding window to the conversation history when it exceeds
-     * [MAX_HISTORY_SIZE]. Keeps the system prompt and the most recent messages.
-     */
     private fun trimHistoryIfNeeded() {
         if (history.size <= MAX_HISTORY_SIZE) return
         val systemPrompt = history.firstOrNull { it.role == MessageRole.SYSTEM }
@@ -371,48 +341,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         history.addAll(recentMessages)
     }
 
-    /**
-     * Runs a ReAct-style (Reasoning + Acting) loop for on-device models:
-     *  1. Ensures the [backend] model is loaded (initializing from the stored path if needed).
-     *  2. Builds a text prompt from conversation history + tool descriptions.
-     *  3. Generates a response on-device.
-     *  4. Parses `<tool_call>{json}</tool_call>` tags from the response.
-     *  5. Executes the tool, appends the result to the prompt context, and repeats.
-     *  6. Stops when the model produces a plain-text response (no tool call).
-     */
     private suspend fun runOnDeviceLoop(userText: String, backend: InferenceBackend) {
-        // Determine the model-path preference key for this backend type
-        // (Gemini Nano has no model file — uses the system model)
         val modelPathKey = when (backend) {
             is LiteRtLmBackend          -> Prefs.KEY_LITERT_LM_MODEL_PATH
             is OnDeviceInferenceService -> Prefs.KEY_ON_DEVICE_MODEL_PATH
-            is GeminiNanoBackend        -> null   // No local model file needed
-            else -> error("Unhandled backend type: ${backend::class.simpleName}")
+            is GeminiNanoBackend        -> null
+            else -> error("Unhandled backend type")
         }
 
-        // Ensure the model is loaded
         if (!backend.isReady()) {
             val modelPath = if (modelPathKey != null) {
                 Prefs.getString(getApplication(), modelPathKey).also { path ->
                     if (path.isBlank()) {
-                        _error.postValue(
-                            "No model configured for ${backend.displayName}. " +
-                                "Go to Settings → Inference Backend to set a model path."
-                        )
+                        _error.postValue("No model configured.")
                         return
                     }
                 }
-            } else {
-                "" // Gemini Nano ignores the path
-            }
+            } else ""
+            
             val result = backend.initialize(
                 modelPath = modelPath,
-                maxTokens = Prefs.getInt(
-                    getApplication(), Prefs.KEY_LLM_MAX_TOKENS, Prefs.DEFAULT_MAX_TOKENS
-                ).coerceAtMost(MAX_ON_DEVICE_TOKENS),
-                temperature = Prefs.getFloat(
-                    getApplication(), Prefs.KEY_LLM_TEMPERATURE, Prefs.DEFAULT_TEMPERATURE
-                )
+                maxTokens = Prefs.getInt(getApplication(), Prefs.KEY_LLM_MAX_TOKENS, Prefs.DEFAULT_MAX_TOKENS).coerceAtMost(MAX_ON_DEVICE_TOKENS),
+                temperature = Prefs.getFloat(getApplication(), Prefs.KEY_LLM_TEMPERATURE, Prefs.DEFAULT_TEMPERATURE)
             )
             if (result.isFailure) {
                 _error.postValue("Failed to load model: ${result.exceptionOrNull()?.message}")
@@ -423,177 +373,80 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val tools = buildToolsList()
         val toolDescriptions = buildToolDescriptionsText(tools)
         val executor = ToolExecutor(getApplication())
-
-        // Growing context appended to on each iteration (in text form for the LLM)
         val context = StringBuilder()
 
-        // Replay prior turns into the context (skip system and tool-role messages)
         for (msg in history.dropLast(1)) {
             when (msg.role) {
                 MessageRole.USER -> context.appendLine("User: ${msg.content}")
-                MessageRole.ASSISTANT -> {
-                    if (msg.toolCalls.isNullOrEmpty()) {
-                        context.appendLine("Assistant: ${msg.content}")
-                    }
-                }
+                MessageRole.ASSISTANT -> if (msg.toolCalls.isNullOrEmpty()) context.appendLine("Assistant: ${msg.content}")
                 else -> {}
             }
         }
         context.append("User: $userText\nAssistant:")
 
-        // Tag delimiters for extracting on-device tool calls from model output
         val toolCallStartTag = "<tool_call>"
         val toolCallEndTag = "</tool_call>"
-
         var iterations = 0
         var completedNormally = false
         val startMs = System.currentTimeMillis()
 
         while (iterations < MAX_REACT_ITERATIONS) {
             iterations++
-
             val fullPrompt = buildOnDeviceSystemPrompt(toolDescriptions) + context
-            
-            // Create a placeholder streaming message
-            val streamingMessage = ChatMessage(
-                role = MessageRole.ASSISTANT,
-                content = "",
-                isStreaming = true
-            )
+            val streamingMessage = ChatMessage(role = MessageRole.ASSISTANT, content = "", isStreaming = true)
             history.add(streamingMessage)
             _messages.postValue(history.filterVisible())
             
-            // Collect streamed tokens and accumulate the response
             val rawResponse = StringBuilder()
             backend.generateStream(fullPrompt).collect { token ->
                 rawResponse.append(token)
-                // Update the streaming message with accumulated content
                 val updatedMessage = streamingMessage.copy(content = rawResponse.toString())
                 history[history.lastIndexOf(streamingMessage)] = updatedMessage
                 _messages.postValue(history.filterVisible())
             }
             
-            // Mark streaming complete and finalize the message
-            val finalMessage = streamingMessage.copy(
-                content = rawResponse.toString().trim(),
-                isStreaming = false
-            )
+            val finalMessage = streamingMessage.copy(content = rawResponse.toString().trim(), isStreaming = false)
             history[history.lastIndexOf(streamingMessage)] = finalMessage
-            _messages.postValue(history.filterVisible())
             
             val trimmedResponse = rawResponse.toString().trim()
-
-            // Extract JSON between <tool_call> ... </tool_call> using simple string search
-            // rather than regex to correctly handle nested braces in the JSON body.
-            // Case-sensitive: the prompt instructs the model to use these exact lowercase tags.
             val startIdx = trimmedResponse.indexOf(toolCallStartTag)
             val endIdx = trimmedResponse.indexOf(toolCallEndTag)
-            val toolCallJson = if (startIdx >= 0 && endIdx > startIdx) {
-                // Only treat as tool call if the tag is at the beginning (after trimming)
-                // This prevents false positives when the model includes tags in plain text responses
-                if (trimmedResponse.startsWith(toolCallStartTag)) {
-                    trimmedResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
-                } else {
-                    null  // Tags not at start, treat as plain text
-                }
+            val toolCallJson = if (startIdx >= 0 && endIdx > startIdx && trimmedResponse.startsWith(toolCallStartTag)) {
+                trimmedResponse.substring(startIdx + toolCallStartTag.length, endIdx).trim()
             } else null
 
             if (toolCallJson != null) {
                 @Suppress("UNCHECKED_CAST")
-                val toolCallMap = runCatching {
-                    gson.fromJson(toolCallJson, Map::class.java) as? Map<String, Any?>
-                }.getOrElse { e ->
-                    // Model produced a malformed tool call; report it and treat as final answer
-                    val msg = "On-device model returned invalid tool call JSON: ${e.message}"
-                    history.add(ChatMessage(role = MessageRole.ASSISTANT, content = msg))
+                val toolCallMap = runCatching { gson.fromJson(toolCallJson, Map::class.java) as? Map<String, Any?> }.getOrNull()
+                if (toolCallMap == null) {
+                    history.add(ChatMessage(role = MessageRole.ASSISTANT, content = "Invalid tool call JSON."))
                     _messages.postValue(history.filterVisible())
                     return
                 }
 
-                if (toolCallMap == null) {
-                    // Gson returned null (e.g., empty JSON); skip and treat as final answer
-                    // The streaming message is already in history, just update with metadata
-                    val durationMs = System.currentTimeMillis() - startMs
-                    val finalText = trimmedResponse.trimAssistantPrefix()
-                    val updatedFinal = finalMessage.copy(
-                        content = finalText,
-                        responseInfo = ResponseInfo(backend.displayName, null, durationMs)
-                    )
-                    history[history.lastIndexOf(finalMessage)] = updatedFinal
-                    _messages.postValue(history.filterVisible())
-                    completedNormally = true
-                    break
-                }
-
-                // Remove the streaming message since we have a tool call
                 history.remove(finalMessage)
-                
                 val toolName = toolCallMap["name"]?.toString() ?: ""
                 @Suppress("UNCHECKED_CAST")
-                val toolArgs = toolCallMap["arguments"]
-                    ?.let { it as? Map<String, Any?> }
-                    ?: emptyMap()
-
-                // Show the tool call in the chat UI
+                val toolArgs = toolCallMap["arguments"]?.let { it as? Map<String, Any?> } ?: emptyMap()
                 val callId = "od_${toolCallCounter.incrementAndGet()}"
-                history.add(
-                    ChatMessage(
-                        role = MessageRole.ASSISTANT,
-                        content = null,
-                        toolCalls = listOf(
-                            ToolCallData(
-                                id = callId,
-                                type = "function",
-                                function = FunctionCallData(toolName, toolCallJson)
-                            )
-                        )
-                    )
-                )
-                _messages.postValue(history.filterVisible())
-
-                // Show executing state
-                val executingMessage = ChatMessage(
-                    role = MessageRole.ASSISTANT,
-                    content = null,
-                    executingInfo = com.th3cavalry.androidllm.data.ExecutingInfo(
-                        toolName = toolName,
-                        status = getToolExecutingStatus(toolName)
-                    )
-                )
+                
+                history.add(ChatMessage(role = MessageRole.ASSISTANT, content = null, toolCalls = listOf(ToolCallData(id = callId, type = "function", function = FunctionCallData(toolName, toolCallJson)))))
+                val executingMessage = ChatMessage(role = MessageRole.ASSISTANT, content = null, executingInfo = com.th3cavalry.androidllm.data.ExecutingInfo(toolName = toolName, status = getToolExecutingStatus(toolName)))
                 history.add(executingMessage)
                 _messages.postValue(history.filterVisible())
 
-                // Execute the tool
-                val toolResult = runCatching {
-                    executor.execute(toolName, toolArgs)
-                }.getOrElse { "Error: ${it.message}" }
-
-                // Remove executing message and show the tool result
+                val toolResult = runCatching { executor.execute(toolName, toolArgs) }.getOrElse { "Error: ${it.message}" }
                 history.remove(executingMessage)
-                history.add(
-                    ChatMessage(
-                        role = MessageRole.TOOL,
-                        content = toolResult,
-                        toolCallId = callId,
-                        toolName = toolName
-                    )
-                )
+                history.add(ChatMessage(role = MessageRole.TOOL, content = toolResult, toolCallId = callId, toolName = toolName))
                 _messages.postValue(history.filterVisible())
 
-                // Grow the context so the model can see the result
                 context.appendLine(" $toolCallStartTag$toolCallJson$toolCallEndTag")
                 context.appendLine("Tool result ($toolName): $toolResult")
                 context.append("Assistant:")
-
             } else {
-                // No tool call tag found → final answer
-                // The streaming message is already in history, just update with metadata
                 val durationMs = System.currentTimeMillis() - startMs
-                val finalText = trimmedResponse.trimAssistantPrefix()
-                val updatedFinal = finalMessage.copy(
-                    content = finalText,
-                    responseInfo = ResponseInfo(backend.displayName, null, durationMs)
-                )
+                val finalText = trimmedResponse.removePrefix(":").trim()
+                val updatedFinal = finalMessage.copy(content = finalText, responseInfo = ResponseInfo(backend.displayName, null, durationMs))
                 history[history.lastIndexOf(finalMessage)] = updatedFinal
                 _messages.postValue(history.filterVisible())
                 completedNormally = true
@@ -602,17 +455,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (!completedNormally) {
-            val msg = "Maximum reasoning steps reached."
-            history.add(ChatMessage(role = MessageRole.ASSISTANT, content = msg))
+            history.add(ChatMessage(role = MessageRole.ASSISTANT, content = "Maximum reasoning steps reached."))
             _messages.postValue(history.filterVisible())
         }
     }
 
-    /**
-     * Builds the system-level portion of the on-device prompt.
-     * The prompt instructs the model to use `<tool_call>{json}</tool_call>` syntax,
-     * which modern instruction-tuned models (Gemma, Phi, Llama, etc.) follow reliably.
-     */
     private fun buildOnDeviceSystemPrompt(toolDescriptions: String): String = """
 You are a powerful AI assistant. You have access to the following tools:
 
@@ -622,12 +469,8 @@ To call a tool, output EXACTLY this and nothing else on that turn:
 <tool_call>{"name":"tool_name","arguments":{"param":"value"}}</tool_call>
 
 After a tool result is given, continue reasoning. When you have the final answer, respond normally without any <tool_call> tags.
-
 """.trimIndent() + "\n"
 
-    /**
-     * Renders the available [tools] as a human-readable description for on-device prompts.
-     */
     private fun buildToolDescriptionsText(tools: List<ToolDto>): String =
         tools.joinToString("\n") { tool ->
             val params = tool.function.parameters["properties"]
@@ -641,39 +484,18 @@ After a tool result is given, continue reasoning. When you have the final answer
                 if (params.isNotEmpty()) "\n  Parameters: $params" else ""
         }
 
-    // ─── Shared helpers ───────────────────────────────────────────────────────
-
-    /**
-     * Some on-device models (e.g. Gemma) produce a leading `:` or whitespace when the
-     * prompt ends with `"Assistant:"` and generation starts from a blank slate.
-     * Strip it so the displayed response starts cleanly.
-     */
-    private fun String.trimAssistantPrefix(): String = removePrefix(":").trim()
-
-    /**
-     * Builds the full tools list: built-in tools + tools from enabled MCP servers.
-     */
     private suspend fun buildToolsList(): List<ToolDto> {
         val tools = LLMService.builtInTools().toMutableList()
-
         val mcpServers: List<MCPServer> = Prefs.getMCPServers(getApplication())
         for (server in mcpServers.filter { it.enabled }) {
             try {
                 val client = MCPClient(server)
-                if (client.initialize()) {
-                    tools.addAll(client.listTools())
-                }
-            } catch (e: Exception) {
-                // Skip unavailable MCP servers
-            }
+                if (client.initialize()) tools.addAll(client.listTools())
+            } catch (e: Exception) {}
         }
-
         return tools
     }
 
-    /** Filters messages for display, respecting the hide-tool-messages preference
-     * and always removing the SYSTEM prompt.
-     */
     private fun List<ChatMessage>.filterVisible(): List<ChatMessage> {
         val hideTools = Prefs.getBoolean(getApplication(), Prefs.KEY_HIDE_TOOL_MESSAGES, false)
         return filter { msg ->
@@ -681,26 +503,27 @@ After a tool result is given, continue reasoning. When you have the final answer
                 msg.role == MessageRole.SYSTEM -> false
                 hideTools && msg.role == MessageRole.TOOL -> false
                 hideTools && msg.role == MessageRole.ASSISTANT && msg.toolCalls != null -> false
-                // Never hide executing messages
                 msg.executingInfo != null -> true
                 else -> true
             }
         }
     }
 
-    /** Returns a status message for the executing tool based on its type. */
     private fun getToolExecutingStatus(toolName: String): String? {
         return when {
             toolName.contains("ssh") -> "Connecting to remote server..."
             toolName.contains("github") -> "Accessing GitHub API..."
             toolName.contains("search") -> "Searching the web..."
             toolName.contains("fetch") -> "Fetching URL content..."
+            toolName.contains("system_set_alarm") -> "Setting alarm..."
+            toolName.contains("system_create_calendar_event") -> "Opening calendar..."
+            toolName.contains("system_get_info") -> "Reading device status..."
+            toolName.contains("knowledge_search") -> "Searching knowledge base..."
             toolName.contains("__") -> "Calling MCP server..."
             else -> null
         }
     }
 
-    /** Auto-saves the session after each user turn (if the chat is non-empty). */
     private fun autoSaveSession() {
         val visibleMessages = history.filterVisible()
         if (visibleMessages.none { it.role == MessageRole.USER }) return
@@ -710,18 +533,16 @@ After a tool result is given, continue reasoning. When you have the final answer
             timestamp = activeSessionId,
             messages = visibleMessages
         )
-        Prefs.saveSession(getApplication(), session)
+        viewModelScope.launch { chatRepo.saveSession(session) }
     }
 
-    /** Derives a human-readable title from the first user message in a message list. */
     private fun sessionTitle(messages: List<ChatMessage>): String =
         messages.firstOrNull { it.role == MessageRole.USER }?.content?.take(60) ?: "Chat"
 
     override fun onCleared() {
         super.onCleared()
-        // Don't close the backend here — it's cached at the App level
-        // so it survives ViewModel recreation. The App will release it
-        // on memory pressure or process death.
+        voiceService.shutdown()
+        vectorDbService.close()
         activeBackend = null
         (getApplication<Application>() as? com.th3cavalry.androidllm.App)
             ?.removeMemoryPressureListener(memoryPressureHandler)

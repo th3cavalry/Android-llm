@@ -97,6 +97,16 @@
                 app:icon="@drawable/ic_add"
                 app:iconSize="20dp" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnVoice"
+                style="@style/Widget.Material3.Button.Icon"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="center_vertical"
+                android:contentDescription="@string/voice_input"
+                app:icon="@drawable/ic_mic"
+                app:iconSize="20dp" />
+
             <EditText
                 android:id="@+id/etInput"
                 android:layout_width="0dp"

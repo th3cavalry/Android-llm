@@ -38,9 +38,12 @@ locally. No data leaves your device.
 ## Permissions
 
 | Permission | Purpose |
-|---|---|
+| --- | --- |
 | INTERNET | Connect to user-configured LLM endpoints, web search, MCP servers |
 | ACCESS_NETWORK_STATE | Check connectivity before making API calls |
+| RECORD_AUDIO | Voice input via speech-to-text |
+| SET_ALARM | Create alarms via system tool |
+| FOREGROUND_SERVICE | Host local MCP server |
 | READ_EXTERNAL_STORAGE (API ≤ 32) | Access legacy model files in public storage |
 | WRITE_EXTERNAL_STORAGE (API ≤ 28) | DownloadManager fallback for older devices |
 

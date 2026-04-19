@@ -130,6 +130,12 @@ class MainActivity : AppCompatActivity() {
         observeViewModel()
         chatAdapter.showResponseInfo = Prefs.getBoolean(this, Prefs.KEY_SHOW_RESPONSE_INFO, false)
 
+        // Request audio recording permission for voice mode
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) 
+            != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 1002)
+        }
+
         // Migrate legacy SharedPreferences sessions to Room on first launch
         viewModel.migrateFromPrefsIfNeeded()
 
@@ -161,7 +167,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupInput() {
         binding.btnSend.setOnClickListener { sendMessage() }
-        binding.btnStop.setOnClickListener { viewModel.stopGeneration() }
+        binding.btnStop.setOnClickListener { 
+            viewModel.stopGeneration()
+            viewModel.stopVoice()
+        }
 
         binding.etInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
@@ -177,6 +186,15 @@ class MainActivity : AppCompatActivity() {
         binding.btnRemoveImage.setOnClickListener {
             pendingImageUri = null
             binding.imagePreviewContainer.visibility = View.GONE
+        }
+
+        // Voice input
+        binding.btnVoice.setOnClickListener {
+            if (viewModel.isListening.value == true) {
+                viewModel.stopListening()
+            } else {
+                viewModel.startListening()
+            }
         }
     }
 
@@ -197,6 +215,15 @@ class MainActivity : AppCompatActivity() {
                     binding.recyclerView.scrollToPosition(messages.size - 1)
                 }
             }
+
+            // Auto-speak the last message if it's from the assistant and finished streaming
+            val lastMsg = messages.lastOrNull()
+            if (lastMsg?.role == com.th3cavalry.androidllm.data.MessageRole.ASSISTANT &&
+                lastMsg.isStreaming == false &&
+                !lastMsg.content.isNullOrBlank() &&
+                lastMsg.toolCalls.isNullOrEmpty()) {
+                viewModel.speak(lastMsg.content!!)
+            }
         }
 
         viewModel.isLoading.observe(this) { loading ->
@@ -215,6 +242,15 @@ class MainActivity : AppCompatActivity() {
         viewModel.memoryWarning.observe(this) { warning ->
             if (warning != null) {
                 Snackbar.make(binding.root, warning, Snackbar.LENGTH_LONG).show()
+            }
+        }
+
+        viewModel.isListening.observe(this) { isListening ->
+            binding.btnVoice.setIconResource(if (isListening) R.drawable.ic_stop else R.drawable.ic_mic)
+            if (isListening) {
+                binding.etInput.setHint("Listening…")
+            } else {
+                binding.etInput.setHint(R.string.message_hint)
             }
         }
     }

@@ -10,6 +10,8 @@ import com.th3cavalry.androidllm.Prefs
 class ToolExecutor(private val context: Context) {
 
     private val sshService = SSHService()
+    private val systemToolService = SystemToolService(context)
+    private val vectorDbService = VectorDatabaseService(context)
 
     /** Cache of initialized MCP clients keyed by server name. */
     private val mcpClients = mutableMapOf<String, MCPClient>()
@@ -37,6 +39,10 @@ class ToolExecutor(private val context: Context) {
             toolName == "github_read_file" -> executeGitHubRead(arguments)
             toolName == "github_write_file" -> executeGitHubWrite(arguments)
             toolName == "github_list_files" -> executeGitHubList(arguments)
+            toolName == "system_get_info" -> executeSystemGetInfo()
+            toolName == "system_set_alarm" -> executeSystemSetAlarm(arguments)
+            toolName == "system_create_calendar_event" -> executeSystemCreateCalendarEvent(arguments)
+            toolName == "knowledge_search" -> executeKnowledgeSearch(arguments)
             toolName.contains("__") -> executeMcpTool(toolName, arguments)
             else -> "Unknown tool: $toolName"
         }
@@ -106,6 +112,48 @@ class ToolExecutor(private val context: Context) {
         val ref = args["ref"]?.toString() ?: "main"
 
         return githubService().listFiles(owner, repo, path, ref)
+    }
+
+    private fun executeSystemGetInfo(): String {
+        val battery = systemToolService.getBatteryStatus()
+        val time = systemToolService.getDeviceTime()
+        return "$battery\n$time"
+    }
+
+    private fun executeSystemSetAlarm(args: Map<String, Any?>): String {
+        val label = args["label"]?.toString() ?: "Alarm"
+        val hour = (args["hour"] as? Number)?.toInt() ?: return "Missing required parameter: hour"
+        val minutes = (args["minutes"] as? Number)?.toInt() ?: return "Missing required parameter: minutes"
+        return systemToolService.createAlarm(label, hour, minutes)
+    }
+
+    private fun executeSystemCreateCalendarEvent(args: Map<String, Any?>): String {
+        val title = args["title"]?.toString() ?: return "Missing required parameter: title"
+        val description = args["description"]?.toString() ?: ""
+        val location = args["location"]?.toString()
+        return systemToolService.createCalendarEvent(title, description, location)
+    }
+
+    private suspend fun executeKnowledgeSearch(args: Map<String, Any?>): String {
+        val query = args["query"]?.toString() ?: return "Missing required parameter: query"
+        val limit = (args["limit"] as? Number)?.toInt() ?: 3
+        
+        // Ensure vector DB is initialized
+        val modelPath = Prefs.getString(context, Prefs.KEY_EMBEDDING_MODEL_PATH)
+        if (modelPath.isBlank()) {
+            return "Knowledge search failed: No embedding model configured in Settings."
+        }
+        
+        vectorDbService.initialize(modelPath).onFailure {
+            return "Knowledge search failed to initialize: ${it.message}"
+        }
+        
+        val results = vectorDbService.findRelevant(query, limit)
+        if (results.isEmpty()) return "No relevant information found in local knowledge base."
+        
+        return results.joinToString("\n---\n") { entry ->
+            "Source: ${entry.source}\nContent: ${entry.content}"
+        }
     }
 
     // ─── MCP tools ────────────────────────────────────────────────────────────

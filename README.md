@@ -18,10 +18,18 @@ An Android app that runs an LLM (Large Language Model) with agentic capabilities
 - 🐙 **GitHub Integration** — Read files, write/update files, and list directories in any GitHub repo
 - 🔌 **MCP Servers** — Connect to external [Model Context Protocol](https://modelcontextprotocol.io) servers to add more tools
 - 🔒 **Keystore-Backed Secret Storage** — All API keys and credentials are encrypted using Android Keystore
+- 💾 **Persistent Chat History** — Room database with full session management, export (JSON/Markdown), and search
+- 🖼️ **Multimodal Input** — Attach images to messages for vision-capable models
+- 📄 **Document Context (RAG)** — Load text documents to give the LLM additional context
+- 🎤 **Voice Interaction** — Speech-to-text input and text-to-speech responses via Android native APIs
+- 🔋 **System Tools** — LLM can set alarms, create calendar events, and read device status
+- 🧠 **Local Knowledge Base** — ObjectBox vector database with semantic search for on-device RAG
+- 📲 **Home Screen Widget** — Quick-access widget to start chatting instantly
 
 ## Setup
 
 ### Requirements
+
 - Android 8.0 (API 26) or later
 - A running LLM API endpoint:
   - **[Ollama](https://ollama.ai)** (recommended for local) — default endpoint is `http://<your-ip>:11434/v1`
@@ -33,6 +41,7 @@ An Android app that runs an LLM (Large Language Model) with agentic capabilities
 
 1. Clone this repository
 2. Open in Android Studio, or build on the command line:
+
    ```bash
    # Requires Java 17 (Java 26+ not supported by AGP)
    export JAVA_HOME=/usr/lib/jvm/java-17-openjdk   # Linux
@@ -47,7 +56,7 @@ An Android app that runs an LLM (Large Language Model) with agentic capabilities
 Select your preferred backend in Settings:
 
 | Backend | Model Format | Requirements |
-|---|---|---|
+| --- | --- | --- |
 | **Remote API** | Any (via endpoint) | OpenAI-compatible API server |
 | **MediaPipe** | `.task` | Android 10+, 4 GB+ RAM |
 | **LiteRT-LM** | `.litertlm` | Android 8+, 4 GB+ RAM |
@@ -59,7 +68,7 @@ Select your preferred backend in Settings:
 **Supported models (download `.task` files from Kaggle):**
 
 | Model | Size | Recommended for |
-|---|---|---|
+| --- | --- | --- |
 | [Gemma 2B-IT (INT4)](https://www.kaggle.com/models/google/gemma/frameworks/tfLite/variations/gemma-2b-it-gpu-int4) | ~1.4 GB | Best quality/size balance |
 | Gemma 7B-IT | ~4 GB | Best quality (needs 8 GB+ RAM) |
 | Phi-2 | ~1.6 GB | Good English reasoning |
@@ -72,7 +81,7 @@ Download `.litertlm` files via the built-in **Model Browser** (Settings → Mode
 #### Remote API Settings
 
 | Setting | Description |
-|---|---|
+| --- | --- |
 | API Endpoint | Your LLM base URL (e.g. `http://192.168.1.100:11434/v1`) |
 | API Key | Leave blank for Ollama; required for OpenAI |
 | Model | Model name (e.g. `llama3.2`, `gpt-4o`, `mistral`) |
@@ -88,16 +97,19 @@ Download `.litertlm` files via the built-in **Model Browser** (Settings → Mode
 ## Usage Examples
 
 ### Chat & Web Search
+
 > "What's the latest news about the Llama model family?"
 
 The LLM will automatically call `web_search` to find current information.
 
 ### SSH System Administration
+
 > "SSH into 192.168.1.100 as ubuntu and check current CPU and memory usage"
 
 The LLM calls `ssh_execute` with the appropriate commands.
 
 ### GitHub Operations
+
 > "Read the README from torvalds/linux and summarize the build instructions"
 
 The LLM calls `github_read_file` to fetch and summarize the file.
@@ -107,21 +119,30 @@ The LLM calls `github_read_file` to fetch and summarize the file.
 The LLM calls `github_write_file` to create the file.
 
 ### MCP Servers
+
 Add any HTTP-based MCP server in the **MCP Servers** screen. The LLM will discover its tools automatically and use them when appropriate.
 
 ## Architecture
 
-```
+```text
 app/src/main/java/com/th3cavalry/androidllm/
 ├── MainActivity.kt               # Chat UI
 ├── SettingsActivity.kt           # Configuration
 ├── TerminalActivity.kt           # Interactive SSH terminal
 ├── MCPManagerActivity.kt         # MCP server management
 ├── ModelBrowserActivity.kt       # HF model browser & download
+├── AboutActivity.kt              # About screen (Jetpack Compose)
+├── QuickPromptWidget.kt          # Home screen widget
 ├── Prefs.kt                      # SharedPreferences + EncryptedSharedPreferences
 ├── data/
 │   ├── ChatMessage.kt            # Chat message model
+│   ├── KnowledgeEntry.kt         # ObjectBox entity for vector search
 │   └── MCPServer.kt              # MCP server config
+├── db/
+│   ├── Entities.kt               # Room entities (Session, Message)
+│   ├── ChatDao.kt                # Room DAO
+│   ├── AppDatabase.kt            # Room database singleton
+│   └── ChatRepository.kt         # Entity ↔ domain mapping
 ├── network/
 │   ├── LLMApi.kt                 # Retrofit API interface
 │   ├── RetrofitClient.kt         # HTTP client builder
@@ -129,15 +150,20 @@ app/src/main/java/com/th3cavalry/androidllm/
 │   └── dto/ChatDto.kt            # Request/response DTOs
 ├── service/
 │   ├── InferenceBackend.kt       # Common interface for all backends
-│   ├── LLMService.kt             # Remote LLM + agentic tool loop (function calling)
-│   ├── OnDeviceInferenceService.kt  # MediaPipe on-device inference + ReAct loop
+│   ├── LLMService.kt             # Remote LLM + agentic tool loop
+│   ├── OnDeviceInferenceService.kt  # MediaPipe on-device inference
 │   ├── LiteRtLmBackend.kt        # LiteRT-LM inference backend
-│   ├── GeminiNanoBackend.kt      # Gemini Nano (Android AICore)
+│   ├── GeminiNanoBackend.kt       # Gemini Nano (Android AICore)
 │   ├── WebSearchService.kt       # Web search + URL fetching
 │   ├── SSHService.kt             # SSH via JSch
 │   ├── GitHubService.kt          # GitHub REST API
 │   ├── MCPClient.kt              # MCP protocol client
-│   └── ToolExecutor.kt           # Routes tool calls to services
+│   ├── McpServerService.kt       # Local MCP host (Ktor)
+│   ├── ToolExecutor.kt           # Routes tool calls to services
+│   ├── DocumentLoader.kt         # RAG document text extraction
+│   ├── SystemToolService.kt      # OS interactions (alarm, calendar, battery)
+│   ├── VectorDatabaseService.kt  # Local vector DB + semantic search
+│   └── VoiceService.kt           # Speech-to-Text / Text-to-Speech
 ├── ui/
 │   └── ChatAdapter.kt            # RecyclerView chat adapter
 └── viewmodel/
@@ -148,12 +174,14 @@ app/src/main/java/com/th3cavalry/androidllm/
 ## MCP Server Support
 
 Connect to any HTTP-based MCP server that implements the [MCP Streamable HTTP transport](https://spec.modelcontextprotocol.io/specification/basic/transports/). The app will:
+
 1. Initialize a session with the server
 2. Discover all available tools
 3. Namespace them as `ServerName__tool_name`
 4. Automatically use them when the LLM decides
 
 Example MCP servers to try:
+
 - [Filesystem MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
 - [GitHub MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/github)
 - [Brave Search MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search)
@@ -169,7 +197,7 @@ Example MCP servers to try:
 ## Dependencies
 
 | Library | Purpose |
-|---|---|
+| --- | --- |
 | MediaPipe `tasks-genai` | On-device LLM inference (MediaPipe backend) |
 | LiteRT-LM `litertlm-android` | On-device LLM inference (LiteRT backend) |
 | Android AICore | Gemini Nano on-device inference (Pixel 9+ / API 35+) |
@@ -181,6 +209,10 @@ Example MCP servers to try:
 | AndroidX Lifecycle | ViewModel + LiveData |
 | Kotlin Coroutines | Async operations |
 | Material Design 3 | UI components |
+| Room | Local chat history database |
+| ObjectBox | Vector database for semantic search |
+| Jetpack Compose | Modern declarative UI (About screen) |
+| Ktor | Local MCP server hosting |
 
 ## License
 

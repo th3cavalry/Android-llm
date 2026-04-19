@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    id("io.objectbox")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -48,6 +50,7 @@ android {
     buildFeatures {
         viewBinding = true
         buildConfig = true
+        compose = true
     }
 
     packaging {
@@ -89,6 +92,9 @@ dependencies {
     // Supports Gemma, Phi, Falcon in MediaPipe's LiteRT task format.
     implementation("com.google.mediapipe:tasks-genai:0.10.22")
 
+    // On-device Text Embedding — MediaPipe Text API
+    implementation("com.google.mediapipe:tasks-text:0.10.14")
+
     // On-device LLM inference — Google LiteRT-LM (.litertlm format)
     // Google's next-generation on-device LLM SDK (successor to MediaPipe LLM Inference).
     // Supports Gemma 4, Phi-4, Llama, Qwen; GPU/NPU accelerated.
@@ -114,6 +120,26 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+
+    // Jetpack Compose
+    val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // Ktor for local MCP server
+    val ktorVersion = "2.3.12"
+    implementation("io.ktor:ktor-server-core:$ktorVersion")
+    implementation("io.ktor:ktor-server-netty:$ktorVersion")
+    implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
+    implementation("io.ktor:ktor-serialization-gson:$ktorVersion")
 
     // Room Database
     implementation("androidx.room:room-runtime:2.6.1")

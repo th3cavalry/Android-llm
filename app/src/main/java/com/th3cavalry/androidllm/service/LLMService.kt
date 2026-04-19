@@ -304,6 +304,60 @@ class LLMService(private val context: Context) {
                         "required" to listOf("owner", "repo")
                     )
                 )
+            ),
+            ToolDto(
+                function = FunctionDefinitionDto(
+                    name = "system_get_info",
+                    description = "Get current device information including battery level, charging status, current time, and date.",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to emptyMap<String, Any>()
+                    )
+                )
+            ),
+            ToolDto(
+                function = FunctionDefinitionDto(
+                    name = "system_set_alarm",
+                    description = "Set an alarm on the device.",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "label" to mapOf("type" to "string", "description" to "Label for the alarm"),
+                            "hour" to mapOf("type" to "integer", "description" to "Hour (0-23)"),
+                            "minutes" to mapOf("type" to "integer", "description" to "Minutes (0-59)")
+                        ),
+                        "required" to listOf("hour", "minutes")
+                    )
+                )
+            ),
+            ToolDto(
+                function = FunctionDefinitionDto(
+                    name = "system_create_calendar_event",
+                    description = "Open the system calendar to create a new event.",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "title" to mapOf("type" to "string", "description" to "Event title"),
+                            "description" to mapOf("type" to "string", "description" to "Event description"),
+                            "location" to mapOf("type" to "string", "description" to "Event location")
+                        ),
+                        "required" to listOf("title")
+                    )
+                )
+            ),
+            ToolDto(
+                function = FunctionDefinitionDto(
+                    name = "knowledge_search",
+                    description = "Search the local knowledge base for relevant documents and context.",
+                    parameters = mapOf(
+                        "type" to "object",
+                        "properties" to mapOf(
+                            "query" to mapOf("type" to "string", "description" to "Semantic search query"),
+                            "limit" to mapOf("type" to "integer", "description" to "Max results (default 3)")
+                        ),
+                        "required" to listOf("query")
+                    )
+                )
             )
         )
 
@@ -313,11 +367,13 @@ You are a powerful AI assistant running on Android with access to several tools:
 - **web_search**: Search the internet for current information
 - **fetch_url**: Read any web page or URL
 - **ssh_execute**: Run commands on remote servers via SSH
-- **github_read_file**: Read files from GitHub repositories
-- **github_write_file**: Create or update files in GitHub repositories  
-- **github_list_files**: Browse GitHub repository structure
+- **github_read_file**, **github_write_file**, **github_list_files**: Interact with GitHub repositories
+- **system_get_info**: Get device battery and current time/date
+- **system_set_alarm**: Set alarms on the device
+- **system_create_calendar_event**: Create calendar events
+- **knowledge_search**: Search your local knowledge base/documents
 
-Use tools proactively when needed to give accurate, helpful responses. For SSH tasks, always confirm success. For GitHub operations, always verify the content before writing.
+Use tools proactively when needed to give accurate, helpful responses. For system tasks, confirm the action was initiated.
         """.trimIndent()
 
         /** Returns a status message for the executing tool based on its type. */
@@ -327,6 +383,10 @@ Use tools proactively when needed to give accurate, helpful responses. For SSH t
                 toolName.contains("github") -> "Accessing GitHub API..."
                 toolName.contains("search") -> "Searching the web..."
                 toolName.contains("fetch") -> "Fetching URL content..."
+                toolName.contains("system_set_alarm") -> "Setting alarm..."
+                toolName.contains("system_create_calendar_event") -> "Opening calendar..."
+                toolName.contains("system_get_info") -> "Reading device status..."
+                toolName.contains("knowledge_search") -> "Searching knowledge base..."
                 toolName.contains("__") -> "Calling MCP server..."
                 else -> null
             }

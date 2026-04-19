@@ -27,6 +27,9 @@ class App : Application() {
     var cachedBackend: InferenceBackend? = null
         private set
 
+    lateinit var boxStore: io.objectbox.BoxStore
+        private set
+
     /** Cache the given backend, closing the previous one if it's a different type. */
     fun cacheBackend(backend: InferenceBackend) {
         val current = cachedBackend
@@ -53,6 +56,19 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        // Initialize ObjectBox
+        try {
+            val builderClass = Class.forName("com.th3cavalry.androidllm.data.MyObjectBox")
+            val builderMethod = builderClass.getMethod("builder")
+            val builder = builderMethod.invoke(null)
+            val androidContextMethod = builder.javaClass.getMethod("androidContext", android.content.Context::class.java)
+            androidContextMethod.invoke(builder, this)
+            val buildMethod = builder.javaClass.getMethod("build")
+            boxStore = buildMethod.invoke(builder) as io.objectbox.BoxStore
+        } catch (e: Exception) {
+            android.util.Log.e("App", "Failed to initialize ObjectBox: ${e.message}")
+        }
 
         registerComponentCallbacks(object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {

@@ -61,6 +61,7 @@ object Prefs {
     // Model file paths for each local backend (kept separate so users can switch without re-picking)
     const val KEY_ON_DEVICE_MODEL_PATH  = "on_device_model_path"   // MediaPipe .task path
     const val KEY_LITERT_LM_MODEL_PATH  = "litert_lm_model_path"  // LiteRT-LM .litertlm path
+    const val KEY_EMBEDDING_MODEL_PATH  = "embedding_model_path" // MediaPipe .tflite embedding model path
 
     // Hugging Face personal access token — used by the Model Browser for gated model downloads
     const val KEY_HF_TOKEN = "hf_token"
