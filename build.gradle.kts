@@ -5,4 +5,5 @@ plugins {
     id("com.google.devtools.ksp") version "2.0.21-1.0.28" apply false
     id("io.objectbox") version "5.4.1" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+    id("io.gitlab.arturbosch.detekt") version "1.23.8"
 }

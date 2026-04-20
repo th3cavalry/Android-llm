@@ -1,81 +1,101 @@
 #!/bin/bash
 
-# Version bumping script for SovereignDroid
-# Usage: ./scripts/bump-version.sh <patch|minor|major>
+# Improved SemVer Bumper for SovereignDroid
+# Usage: ./scripts/bump-version.sh <major|minor|patch|beta|stable>
 
 set -e
 
-VERSION_FILE="app/build.gradle.kts"
-TAG_PREFIX="v"
+GRADLE_FILE="app/build.gradle.kts"
 
-# Function to get the current version
-get_current_version() {
-    grep "versionName = " "$VERSION_FILE" | sed 's/.*"\(.*\)".*/\1/'
-}
+# Extract current version details
+CURRENT_VERSION=$(grep 'versionName = ' "$GRADLE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+CURRENT_CODE=$(grep 'versionCode = ' "$GRADLE_FILE" | grep -oE '[0-9]+')
 
-# Function to bump version code
-bump_version_code() {
-    local current_code=$(grep "versionCode = " "$VERSION_FILE" | grep -oE "[0-9]+")
-    local new_code=$((current_code + 1))
-    sed -i "s/versionCode = .*/versionCode = $new_code/" "$VERSION_FILE"
-    echo "Bumped versionCode from $current_code to $new_code"
-}
+# Parse version: MAJOR.MINOR.PATCH[-PRERELEASE.BUILD]
+if [[ "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-([a-zA-Z]+)\.([0-9]+))?$ ]]; then
+    MAJOR="${BASH_REMATCH[1]}"
+    MINOR="${BASH_REMATCH[2]}"
+    PATCH="${BASH_REMATCH[3]}"
+    PRE_TAG="${BASH_REMATCH[5]}"    # e.g. "beta" or ""
+    PRE_NUM="${BASH_REMATCH[6]}"    # e.g. "1" or ""
+else
+    echo "❌ Cannot parse current version '$CURRENT_VERSION' as SemVer."
+    exit 1
+fi
 
-# Function to update version name
-update_version_name() {
-    local current_version=$(get_current_version)
-    echo "Current version: $current_version"
-    
-    case $1 in
-        patch)
-            # Replace last component (or -alpha, -beta, etc.) with .X
-            if [[ $current_version =~ ^([0-9]+\.[0-9]+\.[0-9]+)-(.*)$ ]]; then
-                local base="${BASH_REMATCH[1]}"
-                local suffix="${BASH_REMATCH[2]}"
-                local new_patch=$((10#$base + 1))
-                NEW_VERSION="$base.$new_patch-$suffix"
-            else
-                local parts=(${current_version//./ })
-                NEW_VERSION="${parts[0]}.${parts[1]}.$((${parts[2]} + 1))"
-            fi
-            ;;
-        minor)
-            if [[ $current_version =~ ^([0-9]+\.[0-9]+)\.([0-9]+)(-.*)?$ ]]; then
-                NEW_VERSION="${BASH_REMATCH[1]}.$((${BASH_REMATCH[2]} + 1)).0"
-            else
-                NEW_VERSION="0.1.0"
-            fi
-            ;;
-        major)
-            if [[ $current_version =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-.*)?$ ]]; then
-                NEW_VERSION="$((${BASH_REMATCH[1]} + 1)).0.0"
-            else
-                NEW_VERSION="1.0.0"
-            fi
-            ;;
-        *)
-            echo "Usage: $0 <patch|minor|major>"
-            exit 1
-            ;;
-    esac
-    
-    echo "New version: $NEW_VERSION"
-    sed -i "s/versionName = .*/versionName = \"$NEW_VERSION\"/" "$VERSION_FILE"
-}
+BUMP_TYPE=$1
+NEW_MAJOR=$MAJOR
+NEW_MINOR=$MINOR
+NEW_PATCH=$PATCH
+NEW_PRE_TAG=$PRE_TAG
+NEW_PRE_NUM=$PRE_NUM
 
-# Main logic
-echo ""
-echo "=== SovereignDroid Version Bumper ==="
-echo ""
+case "$BUMP_TYPE" in
+    major)
+        NEW_MAJOR=$((MAJOR + 1))
+        NEW_MINOR=0
+        NEW_PATCH=0
+        NEW_PRE_TAG=""
+        NEW_PRE_NUM=""
+        ;;
+    minor)
+        NEW_MINOR=$((MINOR + 1))
+        NEW_PATCH=0
+        NEW_PRE_TAG=""
+        NEW_PRE_NUM=""
+        ;;
+    patch)
+        NEW_PATCH=$((PATCH + 1))
+        NEW_PRE_TAG=""
+        NEW_PRE_NUM=""
+        ;;
+    beta)
+        # If already in a pre-release, increment the pre-release number
+        if [ -n "$PRE_TAG" ]; then
+            NEW_PRE_NUM=$((PRE_NUM + 1))
+        else
+            # If not in pre-release, bump patch and start beta.1 (standard SemVer)
+            NEW_PATCH=$((PATCH + 1))
+            NEW_PRE_TAG="beta"
+            NEW_PRE_NUM=1
+        fi
+        ;;
+    stable)
+        # Remove pre-release tags to make it stable
+        if [ -n "$PRE_TAG" ]; then
+            NEW_PRE_TAG=""
+            NEW_PRE_NUM=""
+        else
+            echo "ℹ️ Version is already stable."
+            exit 0
+        fi
+        ;;
+    *)
+        echo "Usage: $0 <major|minor|patch|beta|stable>"
+        echo "  major:  X.Y.Z -> (X+1).0.0"
+        echo "  minor:  X.Y.Z -> X.(Y+1).0"
+        echo "  patch:  X.Y.Z -> X.Y.(Z+1)"
+        echo "  beta:   X.Y.Z -> X.Y.(Z+1)-beta.1  OR  X.Y.Z-beta.N -> X.Y.Z-beta.(N+1)"
+        echo "  stable: X.Y.Z-beta.N -> X.Y.Z"
+        exit 1
+        ;;
+esac
 
-bump_version_code
-update_version_name "$1"
+# Assemble new version string
+if [ -n "$NEW_PRE_TAG" ]; then
+    NEW_VERSION="${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}-${NEW_PRE_TAG}.${NEW_PRE_NUM}"
+else
+    NEW_VERSION="${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
+fi
 
-echo ""
-echo "Version bump complete!"
-echo ""
-echo "Next steps:"
-echo "1. git add $VERSION_FILE"
-echo "2. git commit -m \"Bump version to $(get_current_version)\""
-echo "3. git tag ${TAG_PREFIX}$(get_current_version)"
-echo "4. git push origin ${TAG_PREFIX}$(get_current_version)"
+NEW_CODE=$((CURRENT_CODE + 1))
+
+echo "📦 Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
+echo "🔢 Bumping versionCode: $CURRENT_CODE -> $NEW_CODE"
+
+# Update the file
+sed -i "s/versionName = \".*\"/versionName = \"$NEW_VERSION\"/" "$GRADLE_FILE"
+sed -i "s/versionCode = .*/versionCode = $NEW_CODE/" "$GRADLE_FILE"
+
+echo "✅ Successfully updated $GRADLE_FILE"
+echo "👉 Next step: git add $GRADLE_FILE && git commit -m \"chore(release): v$NEW_VERSION\" && git tag v$NEW_VERSION"

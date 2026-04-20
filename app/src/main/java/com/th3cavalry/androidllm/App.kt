@@ -59,16 +59,15 @@ class App : Application() {
 
         // Initialize ObjectBox
         try {
-            val builderClass = Class.forName("com.th3cavalry.androidllm.data.MyObjectBox")
-            val builderMethod = builderClass.getMethod("builder")
-            val builder = builderMethod.invoke(null)
-            val androidContextMethod = builder.javaClass.getMethod("androidContext", android.content.Context::class.java)
-            androidContextMethod.invoke(builder, this)
-            val buildMethod = builder.javaClass.getMethod("build")
-            boxStore = buildMethod.invoke(builder) as io.objectbox.BoxStore
+            boxStore = com.th3cavalry.androidllm.data.MyObjectBox.builder()
+                .androidContext(this)
+                .build()
         } catch (e: Exception) {
             android.util.Log.e("App", "Failed to initialize ObjectBox: ${e.message}")
         }
+
+        // Migrate any legacy plaintext secrets to encrypted storage
+        Prefs.migrateSecretsToEncrypted(this)
 
         registerComponentCallbacks(object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {

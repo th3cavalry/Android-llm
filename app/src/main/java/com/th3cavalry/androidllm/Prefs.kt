@@ -82,28 +82,36 @@ object Prefs {
     const val DEFAULT_MAX_TOKENS = 4096
     const val DEFAULT_TEMPERATURE = 0.7f
 
+    @Volatile
+    private var _encryptedPrefs: SharedPreferences? = null
+
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
     /**
      * Get encrypted SharedPreferences for storing secrets (API keys, tokens, SSH keys).
      * These are backed by Android Keystore and NOT included in backups.
+     * The instance is cached after the first successful initialization.
      */
-    private fun encryptedPrefs(context: Context): SharedPreferences = runCatching {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            ENCRYPTED_PREF_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }.getOrElse { e ->
-        // Fallback: if encryption setup fails (rare), log and use regular prefs
-        android.util.Log.e("Prefs", "Failed to initialize encrypted prefs", e)
-        prefs(context)
+    private fun encryptedPrefs(context: Context): SharedPreferences {
+        return _encryptedPrefs ?: synchronized(this) {
+            _encryptedPrefs ?: runCatching {
+                val masterKey = MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                EncryptedSharedPreferences.create(
+                    context,
+                    ENCRYPTED_PREF_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            }.getOrElse { e ->
+                // Fallback: if encryption setup fails (rare), log and use regular prefs
+                android.util.Log.e("Prefs", "Failed to initialize encrypted prefs", e)
+                prefs(context)
+            }.also { _encryptedPrefs = it }
+        }
     }
 
     fun getString(context: Context, key: String, default: String = ""): String =

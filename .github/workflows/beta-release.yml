@@ -2,145 +2,27 @@ name: Build & Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
 
 env:
   APP_NAME: SovereignDroid
   JAVA_VERSION: 21
 
 jobs:
-  # ══════════════════════════════════════════════════════════════════════════════
-  # Step 1: Bump Version (Conventional Commits)
-  # ══════════════════════════════════════════════════════════════════════════════
-  bump-version:
-    name: "Step 1: Auto-Bump Version"
-    # Skip automated version-bump commits to prevent infinite loop
-    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.bump.outputs.new_version }}
-      version_code: ${{ steps.bump.outputs.new_version_code }}
-      bump_type: ${{ steps.bump.outputs.bump_type }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Detect bump type from commit message
-        id: detect
-        run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          echo "📝 Commit message: $COMMIT_MSG"
-
-          # Conventional Commits detection:
-          #   BREAKING CHANGE or !: → major
-          #   feat: → minor
-          #   everything else (fix:, chore:, docs:, style:, refactor:, etc.) → patch
-          if echo "$COMMIT_MSG" | head -1 | grep -qE '^[a-z]+(\(.+\))?!:|BREAKING CHANGE'; then
-            echo "bump_type=major" >> "$GITHUB_OUTPUT"
-            echo "🔴 Detected MAJOR (breaking change)"
-          elif echo "$COMMIT_MSG" | head -1 | grep -qE '^feat(\(.+\))?:'; then
-            echo "bump_type=minor" >> "$GITHUB_OUTPUT"
-            echo "🟡 Detected MINOR (new feature)"
-          else
-            echo "bump_type=patch" >> "$GITHUB_OUTPUT"
-            echo "🟢 Detected PATCH (fix/chore/refactor)"
-          fi
-
-      - name: Bump version in build.gradle.kts
-        id: bump
-        run: |
-          BUMP_TYPE="${{ steps.detect.outputs.bump_type }}"
-          GRADLE_FILE="app/build.gradle.kts"
-
-          # Extract current version
-          CURRENT_VERSION=$(grep 'versionName = ' "$GRADLE_FILE" | sed 's/.*"\(.*\)".*/\1/')
-          CURRENT_CODE=$(grep 'versionCode = ' "$GRADLE_FILE" | grep -oE '[0-9]+')
-          echo "📦 Current: v$CURRENT_VERSION (code $CURRENT_CODE)"
-
-          # Parse version: e.g. 0.1.0-beta.1 → MAJOR=0 MINOR=1 PATCH=0 PRE=beta PRE_NUM=1
-          if [[ "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-([a-zA-Z]+)\.([0-9]+))?$ ]]; then
-            MAJOR="${BASH_REMATCH[1]}"
-            MINOR="${BASH_REMATCH[2]}"
-            PATCH="${BASH_REMATCH[3]}"
-            PRE_TAG="${BASH_REMATCH[5]}"    # e.g. "beta" or ""
-            PRE_NUM="${BASH_REMATCH[6]}"    # e.g. "1" or ""
-          else
-            echo "❌ Cannot parse version '$CURRENT_VERSION'"
-            exit 1
-          fi
-
-          # Calculate new version based on bump type
-          case "$BUMP_TYPE" in
-            major)
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-              if [ -n "$PRE_TAG" ]; then PRE_NUM=1; fi
-              ;;
-            minor)
-              MINOR=$((MINOR + 1))
-              PATCH=0
-              if [ -n "$PRE_TAG" ]; then PRE_NUM=1; fi
-              ;;
-            patch)
-              if [ -n "$PRE_TAG" ]; then
-                # In pre-release: bump the pre-release number (e.g. beta.1 → beta.2)
-                PRE_NUM=$((PRE_NUM + 1))
-              else
-                PATCH=$((PATCH + 1))
-              fi
-              ;;
-          esac
-
-          # Assemble new version string
-          if [ -n "$PRE_TAG" ]; then
-            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}-${PRE_TAG}.${PRE_NUM}"
-          else
-            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          fi
-          NEW_CODE=$((CURRENT_CODE + 1))
-
-          echo "🆕 New: v$NEW_VERSION (code $NEW_CODE) [$BUMP_TYPE bump]"
-
-          # Update build.gradle.kts
-          sed -i "s/versionName = \".*\"/versionName = \"$NEW_VERSION\"/" "$GRADLE_FILE"
-          sed -i "s/versionCode = .*/versionCode = $NEW_CODE/" "$GRADLE_FILE"
-
-          # Commit and push
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$GRADLE_FILE"
-          git commit -m "chore(release): v$NEW_VERSION [skip ci]"
-          git push origin main
-
-          # Set outputs
-          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-          echo "new_version_code=$NEW_CODE" >> "$GITHUB_OUTPUT"
-          echo "bump_type=$BUMP_TYPE" >> "$GITHUB_OUTPUT"
-          echo "✅ Version bumped: $CURRENT_VERSION → $NEW_VERSION"
-
-  # ══════════════════════════════════════════════════════════════════════════════
-  # Step 2: Code Quality Checks
-  # ══════════════════════════════════════════════════════════════════════════════
-  code-quality:
-    name: "Step 2: Code Quality Checks"
-    needs: bump-version
+  validate:
+    name: "Step 1: Validate"
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
     steps:
-      - name: Checkout code (with bumped version)
+      - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Secret Scan (TruffleHog)
+        uses: trufflesecurity/trufflehog@main
         with:
-          ref: main
+          extra_args: --only-verified
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -152,102 +34,25 @@ jobs:
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x ./gradlew
+      - name: Static Analysis (Detekt)
+        run: ./gradlew detekt
 
-      - name: Run Android Lint
-        run: |
-          echo "🔍 Running Android Lint..."
-          ./gradlew lintDebug
-        continue-on-error: true
+      - name: Android Lint
+        run: ./gradlew lintDebug
 
-      - name: Upload Lint Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-results
-          path: app/build/reports/lint-results-*.html
-          retention-days: 30
+      - name: Unit Tests
+        run: ./gradlew testDebugUnitTest
 
-      - name: Run Unit Tests
-        run: |
-          echo "🧪 Running unit tests..."
-          ./gradlew testDebugUnitTest
-        continue-on-error: true
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: app/build/reports/tests/
-          retention-days: 30
-
-  # ══════════════════════════════════════════════════════════════════════════════
-  # Step 3: Security Audit
-  # ══════════════════════════════════════════════════════════════════════════════
-  security-audit:
-    name: "Step 3: Security Audit"
-    needs: bump-version
+  build-and-release:
+    name: "Step 2: Build & Release"
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-
+      contents: write
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Check for hardcoded secrets
-        run: |
-          echo "🔐 Scanning for hardcoded secrets..."
-          if grep -r -i "password\s*=\s*['\"]" app/src/ --include="*.kt" --include="*.java" | grep -v "//"; then
-            echo "⚠️  WARNING: Found potential hardcoded passwords"
-          fi
-          if grep -r -i "api_key\s*=\s*['\"]" app/src/ --include="*.kt" --include="*.java" | grep -v "//"; then
-            echo "⚠️  WARNING: Found potential hardcoded API keys"
-          fi
-          echo "✅ Secret scan completed"
-
-      - name: Check AndroidManifest.xml security
-        run: |
-          echo "🛡️  Checking AndroidManifest.xml security settings..."
-          MANIFEST="app/src/main/AndroidManifest.xml"
-          if grep -q 'android:debuggable="true"' "$MANIFEST"; then
-            echo "❌ ERROR: android:debuggable=true should not be set in manifest"
-            exit 1
-          fi
-          if grep -q 'android:networkSecurityConfig' "$MANIFEST"; then
-            echo "✅ Network security config is present"
-          else
-            echo "⚠️  WARNING: Consider adding network security configuration"
-          fi
-          echo "✅ Manifest security check completed"
-
-      - name: Verify ProGuard rules
-        run: |
-          if [ -f "app/proguard-rules.pro" ]; then
-            echo "✅ ProGuard rules file exists"
-          else
-            echo "⚠️  WARNING: ProGuard rules file not found"
-          fi
-
-  # ══════════════════════════════════════════════════════════════════════════════
-  # Step 4: Build APK
-  # ══════════════════════════════════════════════════════════════════════════════
-  build-apk:
-    name: "Step 4: Build APK"
-    needs: [bump-version, code-quality, security-audit]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code (with bumped version)
-        uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -259,150 +64,50 @@ jobs:
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x ./gradlew
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          # The KEYSTORE_PATH will be handled by the signing step below or we can use a temporary file
 
-      - name: Build Debug APK
-        run: |
-          echo "🔨 Building Debug APK..."
-          ./gradlew assembleDebug --stacktrace
-          if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
-            APK_SIZE=$(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)
-            echo "✅ APK built successfully (size: $APK_SIZE)"
-          else
-            echo "❌ ERROR: APK file not found"
-            exit 1
-          fi
-
-      - name: Rename APK with version
-        run: |
-          VERSION="${{ needs.bump-version.outputs.version }}"
-          cp app/build/outputs/apk/debug/app-debug.apk \
-             "app/build/outputs/apk/debug/${{ env.APP_NAME }}-v${VERSION}.apk"
-          echo "✅ APK renamed to ${{ env.APP_NAME }}-v${VERSION}.apk"
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
         with:
-          name: ${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}
-          path: app/build/outputs/apk/debug/${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}.apk
-          retention-days: 90
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Generate APK checksum
+      - name: Get Version Name
+        id: get_version
         run: |
-          cd app/build/outputs/apk/debug/
-          sha256sum "${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}.apk" > \
-                    "${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}.apk.sha256"
-          cat "${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}.apk.sha256"
+          VERSION_NAME=$(grep "versionName =" app/build.gradle.kts | head -n 1 | awk -F'"' '{print $2}')
+          echo "version=$VERSION_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Upload checksum
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}-checksum
-          path: app/build/outputs/apk/debug/${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}.apk.sha256
-          retention-days: 90
-
-  # ══════════════════════════════════════════════════════════════════════════════
-  # Step 5: Tag & Release
-  # ══════════════════════════════════════════════════════════════════════════════
-  create-release:
-    name: "Step 5: Tag & Create GitHub Release"
-    needs: [bump-version, build-apk]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Download APK artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}
-          path: release-assets
-
-      - name: Download checksum
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}-checksum
-          path: release-assets
-
-      - name: Determine release type
-        id: release_notes
+      - name: Rename APK
         run: |
-          VERSION="${{ needs.bump-version.outputs.version }}"
-          if [[ "$VERSION" =~ -beta ]]; then
-            RELEASE_TYPE="Beta"
-            IS_PRERELEASE="true"
-          elif [[ "$VERSION" =~ -alpha ]]; then
-            RELEASE_TYPE="Alpha"
-            IS_PRERELEASE="true"
-          elif [[ "$VERSION" =~ -rc ]]; then
-            RELEASE_TYPE="Release Candidate"
-            IS_PRERELEASE="true"
-          else
-            RELEASE_TYPE="Stable"
-            IS_PRERELEASE="false"
-          fi
-          echo "release_type=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
-          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+          VERSION="${{ steps.get_version.outputs.version }}"
+          mv ${{ steps.sign_app.outputs.signedReleaseFile }} "app/build/outputs/apk/release/${{ env.APP_NAME }}-v${VERSION}.apk"
+          echo "SIGNED_APK=app/build/outputs/apk/release/${{ env.APP_NAME }}-v${VERSION}.apk" >> $GITHUB_ENV
 
-      - name: Create tag
+      - name: Generate Checksum
         run: |
-          VERSION="${{ needs.bump-version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${VERSION}" -m "Release v${VERSION} (${{ needs.bump-version.outputs.bump_type }} bump)"
-          git push origin "v${VERSION}"
-          echo "✅ Created and pushed tag v${VERSION}"
+          sha256sum "${{ env.SIGNED_APK }}" > "${{ env.SIGNED_APK }}.sha256"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.bump-version.outputs.version }}
-          name: "SovereignDroid v${{ needs.bump-version.outputs.version }} (${{ steps.release_notes.outputs.release_type }})"
-          prerelease: ${{ steps.release_notes.outputs.is_prerelease }}
-          body: |
-            ## 🚀 SovereignDroid v${{ needs.bump-version.outputs.version }}
-
-            **Release Type:** ${{ steps.release_notes.outputs.release_type }}
-            **Version Code:** ${{ needs.bump-version.outputs.version_code }}
-            **Bump Type:** ${{ needs.bump-version.outputs.bump_type }}
-            **Build Date:** ${{ github.event.head_commit.timestamp }}
-
-            ---
-
-            ### 📥 Installation
-
-            1. Download the APK below
-            2. Enable "Install from unknown sources" in Android Settings
-            3. Open the APK to install
-
-            **Minimum Android Version:** 8.0 (API 26)
-
-            ### 🔐 Security
-
-            **SHA-256 Checksum:** See attached `.sha256` file
-
-            ### 📱 Obtainium Support
-
-            Add to [Obtainium](https://github.com/ImranR98/Obtainium):
-            - Repository URL: `https://github.com/${{ github.repository }}`
-
-            ### 📝 Changes
-
-            ${{ github.event.head_commit.message }}
-
-            ---
-
-            > ⚠️ **Beta Release** — Please report issues on our [issue tracker](https://github.com/${{ github.repository }}/issues).
-
-          files: |
-            release-assets/${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}.apk
-            release-assets/${{ env.APP_NAME }}-v${{ needs.bump-version.outputs.version }}.apk.sha256
-          fail_on_unmatched_files: true
+          name: "SovereignDroid v${{ steps.get_version.outputs.version }}"
+          prerelease: ${{ contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'alpha') }}
           generate_release_notes: true
+          files: |
+            ${{ env.SIGNED_APK }}
+            ${{ env.SIGNED_APK }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
