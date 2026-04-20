@@ -24,7 +24,8 @@ complexity:
     threshold: 60
   LongParameterList:
     active: true
-    threshold: 6
+    functionThreshold: 6
+    constructorThreshold: 6
   LargeClass:
     active: true
     threshold: 600
@@ -33,19 +34,18 @@ style:
   active: true
   MagicNumber:
     active: true
-    excludeNumbers:
+    ignoreNumbers:
       - "-1"
       - "0"
       - "1"
       - "2"
     ignoreAnnotation: false
     ignoreHashCodeFunction: true
-    ignorePropertyValue: false
+    ignorePropertyDeclaration: false
     ignoreLocalVariableDeclaration: false
     ignoreConstantDeclaration: true
     ignoreCompanionObjectPropertyDeclaration: true
     ignoreEnums: false
-    ignoreNumbersInVariableNames: true
 
 naming:
   active: true
