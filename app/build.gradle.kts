@@ -15,8 +15,8 @@ android {
         applicationId = "com.th3cavalry.androidllm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "0.4.4"
+        versionCode = 20
+        versionName = "0.4.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
@@ -35,8 +35,8 @@ android {
             if (keystorePassword != null && keyAlias != null && keyPassword != null) {
                 storeFile = file(System.getenv("KEYSTORE_PATH") ?: "release.jks")
                 storePassword = keystorePassword
-                keyAlias = keyAlias
-                keyPassword = keyPassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
             }
         }
     }
