@@ -15,8 +15,8 @@ android {
         applicationId = "com.th3cavalry.androidllm"
         minSdk = 26
         targetSdk = 34
-        versionCode = 18
-        versionName = "0.4.3"
+        versionCode = 19
+        versionName = "0.4.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
@@ -28,10 +28,16 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("KEY_ALIAS")
+            val keyPassword = System.getenv("KEY_PASSWORD")
+
+            if (keystorePassword != null && keyAlias != null && keyPassword != null) {
+                storeFile = file(System.getenv("KEYSTORE_PATH") ?: "release.jks")
+                storePassword = keystorePassword
+                keyAlias = keyAlias
+                keyPassword = keyPassword
+            }
         }
     }
 
@@ -39,7 +45,12 @@ android {
         release {
             isMinifyEnabled = true // Enabled for release
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            
+            val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+            if (keystorePassword != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
